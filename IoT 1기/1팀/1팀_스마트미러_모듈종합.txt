@@ -1,0 +1,554 @@
+/* Config Sample
+ *
+ * 해당 코드는 스마트 미러를 구동하는 config.js입니다.
+ * 메일로 보낼때 java script는 전송이 불가하여, 부득이하게 txt 파일로 변환하였으니
+ * 해당 코드를 사용할 때는 확장자명을 js로 변환하여 확인해주시기 바랍니다.
+ */
+ var config = {
+  address: "localhost",
+  electronOptions: {
+    webPreferences: {
+      webviewTag: true
+    }
+  },
+/*let config = {
+	address: "localhost",*/	// Address to listen on, can be:
+							// - "localhost", "127.0.0.1", "::1" to listen on loopback interface
+							// - another specific IPv4/6 to listen on a specific interface
+							// - "0.0.0.0", "::" to listen on any interface
+							// Default, when address config is left out or empty, is "localhost"
+	port: 8080,
+	basePath: "/",	// The URL path where MagicMirror² is hosted. If you are using a Reverse proxy
+									// you must set the sub path here. basePath must end with a /
+	ipWhitelist: ["127.0.0.1", "::ffff:127.0.0.1", "::1"],	// Set [] to allow all IP addresses
+									// or add a specific IPv4 of 192.168.1.5 :
+									// ["127.0.0.1", "::ffff:127.0.0.1", "::1", "::ffff:192.168.1.5"],
+									// or IPv4 range of 192.168.3.0 --> 192.168.3.15 use CIDR format :
+									// ["127.0.0.1", "::ffff:127.0.0.1", "::1", "::ffff:192.168.3.0/28"],
+
+	useHttps: false,			// Support HTTPS or not, default "false" will use HTTP
+	httpsPrivateKey: "",	// HTTPS private key path, only require when useHttps is true
+	httpsCertificate: "",	// HTTPS Certificate path, only require when useHttps is true
+
+	language: "ko",
+	locale: "ko-KR",
+	logLevel: ["INFO", "LOG", "WARN", "ERROR"], // Add "DEBUG" for even more logging
+	timeFormat: 12,
+	units: "metric",
+
+	modules: [
+		{
+			module: "alert",
+			classes: 'always'
+		},
+		{
+			module: "updatenotification",
+			position: "top_bar",
+			classes: 'always'
+		},
+		{
+			module: "clock",
+			position: "top_left",
+			classes: 'always'
+		},
+		/*{
+			module: "calendar",
+			header: "US Holidays",
+			position: "top_left",
+			config: {
+				calendars: [
+					{
+						fetchInterval: 7 * 24 * 60 * 60 * 1000,
+						symbol: "calendar-check",
+						url: "https://ics.calendarlabs.com/76/mm3137/US_Holidays.ics"
+					}
+				]
+			}
+		},*/
+		{
+			module: "compliments",
+			position: "lower_third",
+			classes: '선오님'
+		},
+		{
+			module: "weather",
+			position: "top_right",
+			classes: '선오님',
+			config: {
+				weatherProvider: "openmeteo",
+				type: "current",
+				lat: 37.566,
+				lon: 126.9784
+			}
+		},
+		{
+			module: "weather",
+			position: "top_right",
+			classes: '선오님',
+			header: "주간_예보",
+			config: {
+				weatherProvider: "openmeteo",
+				type: "forecast",
+				lat: 37.566,
+				lon: 126.9784
+			}
+		},
+		{
+			module: "weather",
+			position: "top_right",
+			classes: '은비님',
+			config: {
+				weatherProvider: "openmeteo",
+				type: "current",
+				lat: 40.7143,
+				lon: -74.006
+			}
+		},
+		{
+			module: "weather",
+			position: "top_right",
+			classes: '은비님',
+			header: "주간_예보",
+			config: {
+				weatherProvider: "openmeteo",
+				type: "forecast",
+				lat: 40.7143,
+				lon: -74.006
+			}
+		},
+		{
+			module: "newsfeed",
+			position: "bottom_center",
+			classes: '선오님',
+			config: {
+				feeds: [
+					{
+						title: "뉴스_속보",
+						url: "http://www.yonhapnewstv.co.kr/browse/feed/"
+					}
+				],
+				showSourceTitle: true,
+				showPublishDate: true,
+				broadcastNewsFeeds: true,
+				broadcastNewsUpdates: true
+			}
+		},
+		{
+		  module: "MMM-GroveGestures",
+		  position: "bottom_right",
+		  classes: 'always',
+		  config: {
+			autoStart: true, //When Mirror starts, recognition will start.
+			verbose:false, // If set as `true`, useful messages will be logged.
+			recognitionTimeout: 1000, //Gesture sequence will be ended after this time from last recognized gesture.
+			cancelGesture: "WAVE", //If set, You can cancel gesture sequence with this gesture.
+			visible: true, //Recognized gesture sequence will be displayed on position
+
+			idleTimer: 1000*60*30, // `0` for disable, After this time from last gesture, onIdle will be executed.
+			onIdle: { // See command section
+			  moduleExec: {
+				module: [],
+				exec: (module, gestures) => {
+				  module.hide(1000, null, {lockstring:"GESTURE"})
+				}
+			  }
+			},
+			onDetected: {
+			  notificationExec: {
+				notification: "GESTURE_DETECTED",
+			  },
+			  /* You can make Mirror to wake up the modules which were hidden by onIdle with any gestures.
+			  moduleExec: {
+				module: [],
+				exec: (module) => {
+				  module.show(1000, null, {lockstring:"GESTURE"})
+				}
+			  }
+			  */
+			},
+
+			gestureMapFromTo: { //When your sensor is installed with rotated direction, you can calibrate with this.
+			  "Up": "UP",
+			  "Down": "DOWN",
+			  "Left": "LEFT",
+			  "Right": "RIGHT",
+			  "Forward": "FORWARD",
+			  "Backward": "BACKWARD",
+			  "Clockwise": "CLOCKWISE",
+			  "anti-clockwise": "ANTICLOCKWISE",
+			  "wave": "WAVE"
+			},
+
+			defaultNotification: "GESTURE",
+			pythonPath: "/usr/bin/python", // your python path
+
+			defaultCommandSet: "default",
+			commandSet: {
+			  "default": {
+				"FORWARD-BACKWARD": {
+				  notificationExec: {
+					notification: "EXT_SCREEN-END",
+					payload: null
+				  }
+				},
+				"LEFT-RIGHT": {
+				  notificationExec: {
+					notification: "EXT_SCREEN-WAKEUP",
+					payload:null,
+				  }
+				},
+				"CLOCKWISE": {
+				  moduleExec: {
+					module: [],
+					exec: (module, gestures) => {
+					  module.hide(1000, null, {lockstring:"GESTURE"})
+					}
+				  }
+				},
+				"ANTICLOCKWISE": {
+				  moduleExec: {
+					module: [],
+					exec: (module, gestures) => {
+					  module.show(1000, null, {lockstring:"GESTURE"})
+					}
+				  }
+				},
+				"LEFT": {
+				  notificationExec: {
+					notification: "EXT_PAGES-DECREMENT",
+					payload: null,
+				  }
+				},
+				"RIGHT": {
+				  notificationExec: {
+					notification: "EXT_PAGES-INCREMENT",
+					payload: null,
+				  }
+				},
+				"UP": {
+				  notificationExec: {
+					notification: "EXT_PAGES-PAUSE",
+					payload: null,
+				  }
+				},
+				"DOWN": {
+				  notificationExec: {
+					notification: "EXT_YOUTUBECAST-STOP",
+					payload: null,
+				  }
+				},
+				"UP-DOWN": {
+				  notificationExec: {
+					notification: "EXT_PAGES-RESUME",
+					payload: null,
+				  }
+				},
+			  },
+			},
+		  }
+		},
+		{
+		  module: "MMM-GoogleAssistant",
+		  classes: 'always',
+		  configDeepMerge: true,
+		  config: {
+			debug: false,
+			stopCommand: "stop",
+			otherStopCommands: [],
+			assistantConfig: {
+				lang: "ko-KR",
+				latitude: 37.566,
+				longitude: 126.9784,
+				deviceRegistred: false
+				},
+			responseConfig: {
+			  chimes: {},
+			  imgStatus: {},
+			  zoom: {}
+			},
+			recipes: [
+			"EXT-Pages.js",
+			"EXT-Spotify.js",
+			"EXT-YouTube.js"
+			]
+		  }
+		},
+		{
+		  module: "EXT-Detector",
+		  position: "top_left",
+		  classes: 'always',
+		  config: {
+			debug: false,
+			detectors: [
+			  {
+				detector: "Snowboy",
+				Model: "smart_mirror",
+				Sensitivity: null
+			  }
+			]
+		  }
+		},
+		{
+		  module: "EXT-Alert",
+		  classes: 'always',
+		  animateIn: "fadeInDown",
+		  animateOut: "fadeOutUp",
+		  config: {
+			debug: false,
+			style: 1,
+			ignore: []
+		  }
+		},
+		{
+		  module: "EXT-Background",
+		  classes: 'always',
+		  config: {
+			model: "jarvis",
+			myImage: null
+		  }
+		},
+		{
+		  module: "EXT-Browser",
+		  classes: 'always',
+		  config: {
+			debug: false,
+			displayDelay: 60 * 1000,
+			scrollActivate: false,
+			scrollStep: 25,
+			scrollInterval: 1000,
+			scrollStart: 5000
+		  }
+		},
+		{
+		  module: "EXT-Pages",
+		  position: "bottom_bar",
+		  classes: 'always',
+		  config: {
+			pages: {
+			  0: [ "newsfeed", "compliments", "weather" ],
+			  1: [ /*"calendar", */"MMM-GmailFeed", "MMM-GoogleCalendar", "MMM-GyeonggiBus" ],
+			  2: [ "EXT-Spotify", "EXT-YouTube", "EXT-YouTubeCast" ]
+			},
+			fixed: [ "clock", "EXT-Screen", "MMM-GroveGestures", "MMM-Face-Multi-User-Recognition-SMAI" /*, "weather"*/ ],
+			hiddenPages: {
+			  /*"screenSaver": [ "clock", "MMM-SomeBackgroundImageModule" ],
+			  "admin": [ "MMM-ShowMeSystemStatsModule", "MMM-AnOnScreenMenuModule" ],*/
+			},
+			rotationTimes: {
+			  0: 20000
+			},
+			indicator: true,
+			hideBeforeRotation: false,
+			rotationTime: 15000,
+			Gateway: {},
+			loading: "loading.png"
+		  }
+		},
+		{
+		  module: "EXT-Screen",
+		  position: "bottom_right",
+		  classes: 'always',
+		  animateIn: "flipInX",
+		  animateOut: "flipOutX",
+		  config: {
+			debug: false,
+			animateBody: true,
+			autoDimmer: true,
+			delay: 10 * 60 * 1000,
+			mode: 1,
+			xrandrForceRotation: "normal",
+			wrandrForceRotation: "normal",
+			wrandrForceMode: null,
+			displayCounter: true,
+			displayBar: true,
+			displayStyle: "Line",
+			displayLastPresence: true,
+			lastPresenceTimeFormat: "LL H:mm",
+			displayAvailability: false,
+			detectorSleeping: false,
+			gpio: 20,
+			clearGpioValue: true,
+			sound: false,
+			touchMode: 3,
+			ON: [],
+			OFF: []
+		  }
+		},
+		{
+		  module: "EXT-Spotify",
+		  position: "top_left",
+		  classes: 'known',
+		  animateIn: "flipInX",
+		  animateOut: "flipOutX",
+		  config: {
+			updateInterval: 1000,
+			idleInterval: 10000,
+			useBottomBar: false,
+			CLIENT_ID: "70e6e96892594ddeb88172b1bb7b2a99",
+			CLIENT_SECRET: "60570dd1e73f4287a2f6e82376a0ed7e",
+			mini: true,
+			forceSCL: false,
+			noCanvas: false
+		  }
+		},
+		{
+		  module: 'EXT-Librespot',
+		  config: {
+			debug: false,
+			email: "kdtp2024@gmail.com",
+			password: "1q!2w@3e#4r$5t%",
+			deviceName: "KDTP",
+			minVolume: 40,
+			maxVolume: 100
+		  }
+		},
+		{
+		  module: "EXT-YouTube",
+		  position: "top_center", // optional (can be deleted if using fullscreen)
+		  classes: 'known',
+		  config: {
+			fullscreen: false,
+			width: "30vw",
+			height: "30vh",
+			useSearch: true,
+			alwaysDisplayed: true,
+			displayHeader: true,
+			username: null,
+			password: null
+		  }
+		},
+		{
+		  module: "EXT-YouTubeCast",
+		  position: "top_center", // optional (can be deleted if using fullscreen)
+		  classes: 'known',
+		  config: {
+			debug: false,
+			fullscreen: true,
+			width: "30vw",
+			height: "30vh",
+			alwaysDisplayed: true,
+			castName: "KDTP",
+			port: 8569
+		  }
+		},
+		{
+		  module: "MMM-GmailFeed",
+		  position: "top_right",
+		  classes: '은비님',
+		  config: {
+		    username: 'kdtp2024@gmail.com',
+		    password: 'yuijbomgqhjxvxsq',
+		    updateInterval: 60000,
+		    maxEmails: 5,
+		    maxSubjectLength: 7,
+		    maxFromLength: 7,
+		    playSound: true,
+		    autoHide: true,
+		    displayMode: "table",
+		  }
+		},
+		{
+		  module: "MMM-GoogleCalendar",
+		  header: "일정",
+		  position: "top_right",
+		  classes: '은비님',
+		  config: {
+			calendars: [
+			{
+				symbol: "calendar-week",
+				calendarID: "kdtp2024@gmail.com"
+				},
+					// To add more calendars, replicate the above entry within this array with the respective ID
+				],
+			}
+		},
+		{
+		  module: "MMM-GyeonggiBus",
+		  position: "top_left",
+		  classes: '은비님',
+		  config: {
+			  apiBase: "http://apis.data.go.kr/6410000/busarrivalservice/getBusArrivalList",
+			  serviceKey: "Ur0SL4d4XDBeJPRBvnD6oe%2BfLaxEl9631YJqxmDRlh6xs%2BPwYFGSkU6JfFoLTVYcdKw2B3P2eqPD2kApDv28Sw%3D%3D",
+			  stationId: 224000837, //Get StationId from https://data.gg.go.kr/portal/data/service/selectServicePage.do?infId=GDKWAGWYRKJYIRVX110226832213&infSeq=1
+			  routeId: 224000020, //"버스 노선 조회 서비스"의 "노선번호목록조회" 기능으로 버스 번호를 입력해 해당 버스 번호(노선 번호의) routeId를 얻는다.
+			  header: "버스_도착_정보", //Header Title
+			  updateInterval: 1000*60*1, // 1 minute.
+			  },
+		},
+		{
+			module: 'MMM-Face-Reco-DNN',
+			config: {
+			  // Logout 15 seconds after user was not detecte anymore, if they will be detected between this 15
+			  // Seconds, they delay will start again
+			  logoutDelay: 15000,
+			  // How many time the recognition starts, with a RasPi 3+ it would be good every 2 seconds
+			  checkInterval: 2000,
+			  // Module set used for when there is no face detected ie no one is in front of the camera
+			  noFaceClass: 'noface',
+			  // Module set used for when there is an unknown/unrecognised face detected
+			  unknownClass: 'unknown',
+			  // Module set used for when there is a known/recognised face detected
+			  knownClass: 'known',
+			  // Module set used for strangers and if no user is detected
+			  defaultClass: 'default',
+			  // Set of modules which should be shown for any user ie when there is any face detected
+			  everyoneClass: 'everyone',
+			  // Set of modules that are always shown - show if there is a face or no face detected
+			  alwaysClass: 'always',
+			  // xml to recognize with haarcascade
+			  cascade: 'modules/MMM-Face-Reco-DNN/model/haarcascade_frontalface_default.xml',
+			  // pre encoded pickle with the faces
+			  encodings: 'modules/MMM-Face-Reco-DNN/model/encodings.pickle',
+			  // Brightness (0-100)
+			  brightness: 0,
+			  // Contrast (0-127)
+			  contrast: 0,
+			  // Rotate camera image (-1 = no rotation, 0 = 90°, 1 = 180°, 2 = 270°)
+			  rotateCamera: -1,
+			  // method of face recognition (dnn = deep neural network, haar = haarcascade)
+			  method: 'dnn',
+			  // which face detection model to use. "hog" is less accurate but faster on CPUs. "cnn" is a more accurate
+			  // deep-learning model which is GPU/CUDA accelerated (if available). The default is "hog".
+			  detectionMethod: 'hog',
+			  // how fast in ms should the modules hide and show (face effect)
+			  animationSpeed: 0,
+			  // Path to Python to run the face recognition (null / '' means default path, with Bookworm you need to set the virutal environment like /home/youruser/python-facereco/bin/python3. You can also find out the correct path if you are activated the virtual environment and run "which python3")
+			  pythonPath: null,
+			  // Boolean to toggle welcomeMessage
+			  welcomeMessage: true,
+			  // Dictionary for person name mapping in welcome message
+			  // Allows for displaying name with complex character sets in welcome message
+			  // e.g. jerome => Jérôme, hideyuki => 英之, mourad => مراد
+			  usernameDisplayMapping: null,
+			  // Save some pictures from recognized people, if unknown we save it in folder "unknown"
+			  // So you can extend your dataset and retrain it afterwards for better recognitions
+			  extendDataset: false,
+			  // if extenDataset is set, you need to set the full path of the dataset
+			  dataset: 'modules/MMM-Face-Reco-DNN/dataset/',
+			  // How much distance between faces to consider it a match. Lower is more strict.
+			  tolerance: 0.6,
+			  // allow multiple concurrent user logins, 0=no, any other number is the maximum number of concurrent logins
+			  multiUser: 0,
+			  // resoltuion of the image
+			  resolution: [1920, 1080],
+			  // width of the image for processing
+			  processWidth: 500,
+			  // output image on mm
+			  outputmm: 0,
+			  // turn on extra debugging 0=no, 1=yes
+			  debug: 0,
+			}
+		},
+		{
+		  module: "MMM-Face-Multi-User-Recognition-SMAI",
+		  position: "bottom_left",
+		  classes: 'always',
+		  config: {
+			useMMMFaceRecoDNN: true
+		  }
+		},
+	]
+};
+
+/*************** DO NOT EDIT THE LINE BELOW ***************/
+if (typeof module !== "undefined") { module.exports = config; }
