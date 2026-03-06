@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Factory Analytics</title>
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <style>
+        /* (기존 디자인 스타일 그대로 유지) */
+        :root {
+            --bg: #0f0f13; --panel: #1a1a20; --border: #333;
+            --primary: #00d2ff; --accent: #70a1ff;
+            --danger: #ff4757; --success: #2ed573; --text: #e0e0e0;
+            --can: #f1c40f; --bat: #ff6b81; --scrap: #a4b0be; --paper: #ffffff; --plas: #7bed9f;
+        }
+        body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Roboto', sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        
+        nav { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; height: 60px; background: #000; border-bottom: 2px solid #222; flex-shrink: 0; }
+        .brand { font-family: 'Orbitron'; font-size: 1.4rem; color: var(--primary); letter-spacing: 2px; }
+        .tabs { display: flex; gap: 0; height: 100%; }
+        .tab-btn { background: none; border: none; color: #666; padding: 0 25px; cursor: pointer; font-size: 1rem; font-weight: bold; height: 100%; transition: all 0.3s; border-bottom: 3px solid transparent; display: flex; align-items: center; gap: 10px; }
+        .tab-btn:hover { color: #fff; background: #111; }
+        .tab-btn.active { color: var(--primary); border-bottom: 3px solid var(--primary); background: #161616; }
+        .content-area { flex: 1; position: relative; overflow: hidden; padding: 10px; }
+        .page { display: none; width: 100%; height: 100%; }
+        .page.active { display: block; }
+        
+        .analytics-layout { display: grid; grid-template-rows: 60% 40%; gap: 10px; height: 100%; }
+        .chart-box { background: var(--panel); border-radius: 8px; padding: 15px; border: 1px solid var(--border); position: relative; display: flex; flex-direction: column; }
+        
+        .log-container { background: var(--panel); border-radius: 8px; border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+        .log-header { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 10px 15px; background: #000; border-bottom: 1px solid var(--border);
+        }
+        .download-btn {
+            background: #27ae60; color: white; border: none; padding: 5px 12px; 
+            border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.8rem;
+            display: flex; align-items: center; gap: 5px;
+        }
+        .download-btn:hover { background: #2ecc71; }
+
+        .log-table-wrapper { flex: 1; overflow-y: auto; }
+        .log-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.9rem; }
+        .log-table th { position: sticky; top: 0; background: #111; color: #888; text-align: left; padding: 8px; font-size: 0.8rem; }
+        .log-table td { padding: 8px; border-bottom: 1px solid #222; color: #ccc; }
+        .log-table tr:hover { background: rgba(255,255,255,0.05); }
+        
+        .control-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; width: 100%; height: 100%; }
+        .cam-section { display: grid; grid-template-rows: 1fr 1fr; gap: 10px; height: 100%; min-height: 0; }
+        .cam-box { background: #000; border-radius: 8px; border: 1px solid #333; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; width: 100%; height: 100%; }
+        .cam-box img { width: 100%; height: 100%; object-fit: contain; }
+        .badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6); color: var(--primary); padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--primary); font-family: 'Orbitron'; z-index: 5; }
+        .info-section { display: flex; flex-direction: column; gap: 10px; height: 100%; }
+        .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 15px; }
+        .panel-title { font-size: 0.9rem; color: #888; margin-bottom: 10px; font-weight: bold; display: flex; align-items: center; gap: 5px; }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .btn { padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; transition: 0.2s; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        .btn-stop { background: rgba(255, 71, 87, 0.2); color: var(--danger); border: 1px solid var(--danger); grid-column: span 2; }
+        .btn-resume { background: rgba(46, 213, 115, 0.2); color: var(--success); border: 1px solid var(--success); }
+        .btn-reset { background: #333; color: #aaa; border: 1px solid #555; }
+        .stat-list { display: flex; flex-direction: column; gap: 8px; flex: 1; overflow-y: auto; }
+        .stat-row { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 6px; border-left: 4px solid #555; }
+        .stat-name { font-size: 0.9rem; color: #ccc; }
+        .stat-val { font-family: 'Orbitron'; font-size: 1.2rem; font-weight: bold; }
+        .b-total { border-color: var(--primary); } .t-total { color: var(--primary); }
+        .b-can { border-color: var(--can); } .t-can { color: var(--can); }
+        .b-bat { border-color: var(--bat); } .t-bat { color: var(--bat); }
+        .b-scrap { border-color: var(--scrap); } .t-scrap { color: var(--scrap); }
+        .b-paper { border-color: var(--paper); } .t-paper { color: var(--paper); }
+        .b-plas { border-color: var(--plas); } .t-plas { color: var(--plas); }
+        .map-container { width: 100%; height: 100%; background: #15151a; border-radius: 10px; position: relative; border: 1px solid var(--border); overflow: hidden; }
+        .track-svg { width: 100%; height: 100%; }
+        .track-path { fill: none; stroke: #2a2a30; stroke-width: 60; stroke-linecap: round; }
+        .track-dash { fill: none; stroke: #444; stroke-width: 2; stroke-dasharray: 10; opacity: 0.5; }
+        .robot { position: absolute; width: 45px; height: 45px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 1.5rem; transition: all 1s; z-index: 10; cursor: pointer; border: 2px solid white; }
+        #robot-1 { background: var(--primary); color: #000; box-shadow: 0 0 15px var(--primary); }
+        #robot-2 { background: #57606f; color: #fff; box-shadow: 0 0 10px #57606f; opacity: 0.8; transform: scale(0.9); }
+        .marker { position: absolute; transform: translate(-50%, -50%); text-align: center; }
+        .marker-dot { width: 12px; height: 12px; background: #fff; border-radius: 50%; margin: 0 auto; border: 2px solid #555; }
+        .marker-label { font-size: 0.8rem; color: #888; margin-top: 3px; font-weight: bold; }
+        .modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
+        .modal-box { background: #1e1e24; padding: 30px; border-radius: 15px; width: 300px; text-align: center; border: 1px solid var(--primary); position: relative; box-shadow: 0 0 30px rgba(0,210,255,0.3); }
+        .close-btn { position: absolute; top:10px; right:15px; font-size: 24px; cursor: pointer; color:#aaa; }
+        .sim-btn { position: absolute; top: 10px; right: 10px; background: #333; color: #aaa; border: 1px solid #555; padding: 5px 10px; border-radius: 4px; cursor: pointer; z-index: 20; font-size: 0.8rem; }
+        .sim-btn.on { background: var(--success); color: #000; border-color: var(--success); font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="modal" class="modal" onclick="if(event.target.id==='modal') this.style.display='none'">
+        <div class="modal-box">
+            <span class="close-btn" onclick="document.getElementById('modal').style.display='none'">&times;</span>
+            <h3 style="color:var(--primary); font-family:'Orbitron';">ROBOT DETAIL</h3>
+            <div style="font-size:4rem; margin:20px 0;">🤖</div>
+            <div style="text-align: left; padding-left: 20px;">
+                <p>ID: <span id="m-id" style="font-weight:bold; color:white; float:right; margin-right:20px;">-</span></p>
+                <p>TYPE: <span id="m-type" style="color:#aaa; float:right; margin-right:20px;">-</span></p>
+                <p>STATUS: <span id="m-status" style="color:var(--success); float:right; margin-right:20px;">-</span></p>
+                <p>BATTERY: <span id="m-bat" style="color:var(--danger); font-weight:bold; float:right; margin-right:20px;">-</span></p>
+            </div>
+        </div>
+    </div>
+
+    <nav>
+        <div class="brand"><i class="fas fa-network-wired"></i> SMART FACTORY</div>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('control')"><i class="fas fa-desktop"></i> CONTROL</button>
+            <button class="tab-btn" onclick="switchTab('map')"><i class="fas fa-map-location-dot"></i> ROBOT MAP</button>
+            <button class="tab-btn" onclick="switchTab('analytics')"><i class="fas fa-chart-bar"></i> ANALYSIS</button>
+        </div>
+        <div id="clock" style="color:#666; font-family:monospace;">00:00:00</div>
+    </nav>
+
+    <div class="content-area">
+        <div id="page-control" class="page active">
+            <div class="control-layout">
+                <div class="cam-section">
+                    <div class="cam-box"><span class="badge">ROBOT CAM</span><img id="cam-1" src="" onerror="this.src='https://placehold.co/800x600/000/FFF?text=CAM1+STANDBY'"></div>
+                    <div class="cam-box"><span class="badge">CONVEYOR CAM</span><img id="cam-2" src="" onerror="this.src='https://placehold.co/800x600/000/FFF?text=CAM2+STANDBY'"></div>
+                </div>
+                <div class="info-section">
+                    <div class="panel" style="flex:0 0 auto;">
+                        <div class="panel-title">CONTROL</div>
+                        <div class="btn-grid">
+                            <button class="btn btn-stop" onclick="confirmAction('STOP')"><i class="fas fa-ban"></i> STOP</button>
+                            <button class="btn btn-resume" onclick="confirmAction('RESUME')"><i class="fas fa-play"></i> RESUME</button>
+                            <button class="btn btn-reset" onclick="confirmAction('RESET')"><i class="fas fa-redo"></i> RESET</button>
+                        </div>
+                    </div>
+                    <div class="panel" style="flex:1;">
+                        <div class="panel-title">PRODUCTION</div>
+                        <div class="stat-list">
+                            <div class="stat-row b-total"><span class="stat-name">TOTAL</span><span class="stat-val t-total" id="val-total">0</span></div>
+                            <div class="stat-row b-can"><span class="stat-name">CAN</span><span class="stat-val t-can" id="val-can">0</span></div>
+                            <div class="stat-row b-bat"><span class="stat-name">BATTERY</span><span class="stat-val t-bat" id="val-bat">0</span></div>
+                            <div class="stat-row b-paper"><span class="stat-name">PAPER</span><span class="stat-val t-paper" id="val-paper">0</span></div>
+                            <div class="stat-row b-plas"><span class="stat-name">PLASTIC</span><span class="stat-val t-plas" id="val-plas">0</span></div>
+                            <div class="stat-row b-scrap"><span class="stat-name">SCRAP</span><span class="stat-val t-scrap" id="val-scrap">0</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="page-map" class="page">
+            <div class="map-container" id="map-area">
+                <button id="sim-btn" class="sim-btn on" onclick="toggleVirtual()">SIMULATION: ON</button>
+                <svg class="track-svg" viewBox="0 0 800 600" preserveAspectRatio="none">
+                    <rect x="50" y="50" width="700" height="500" rx="100" class="track-path"/>
+                    <rect x="50" y="50" width="700" height="500" rx="100" class="track-dash"/>
+                </svg>
+                <div id="robot-1" class="robot" style="top:90%; left:50%;" onclick="openModal('real')"><i class="fas fa-robot"></i></div>
+                <div id="robot-2" class="robot" style="top:10%; left:50%;" onclick="openModal('virt')"><i class="fas fa-truck-monster"></i></div>
+            </div>
+        </div>
+
+        <div id="page-analytics" class="page">
+            <div class="analytics-layout">
+                <div class="chart-box">
+                    <div class="panel-title">HOURLY PRODUCTION (시간대별 생산량)</div>
+                    <div style="flex:1; position:relative;">
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="log-container">
+                    <div class="log-header">
+                        <span style="color:#aaa; font-weight:bold; font-size:0.9rem;">RECENT LOGS</span>
+                        <button class="download-btn" onclick="downloadCSV()">
+                            <i class="fas fa-file-csv"></i> Excel Download
+                        </button>
+                    </div>
+                    <div class="log-table-wrapper">
+                        <table class="log-table">
+                            <thead><tr><th>TIME</th><th>OBJECT</th><th>TOTAL</th></tr></thead>
+                            <tbody id="log-body">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ★★★ [설정 1] IP 주소 확인 (사용자 환경에 맞게 수정) ★★★
+        const ROBOT_IP = "192.168.0.11"; 
+        const CONVEYOR_IP = "192.168.0.5"; 
+        const MOBIUS_IP = "192.168.0.5";
+
+        const URL_STATS = `http://${CONVEYOR_IP}:8001/api/stats`;
+        const URL_RESET = `http://${CONVEYOR_IP}:8001/api/reset`;
+        const URL_DOWNLOAD = `http://${CONVEYOR_IP}:8001/api/download_log`;
+        
+        // Mobius 관련 주소
+        const URL_CMD = `http://${MOBIUS_IP}:7579/Mobius/Robot_Final/command`;
+        const URL_STATUS = `http://${MOBIUS_IP}:7579/Mobius/Robot_Final/status/la`;
+        const URL_BATTERY = `http://${MOBIUS_IP}:7579/Mobius/Robot_Final/battery/la`;
+
+        // Mobius 헤더 (필수)
+        const MOBIUS_HEADERS = {
+            'Accept': 'application/json',
+            'X-M2M-RI': '12345',
+            'X-M2M-Origin': 'SbDasq'
+        };
+
+        const points = {"S1":{t:"90%",l:"50%"},"S2":{t:"90%",l:"25%"},"S3":{t:"60%",l:"8%"},"S4":{t:"30%",l:"8%"},"S5":{t:"10%",l:"25%"},"S6":{t:"10%",l:"50%"},"S7":{t:"10%",l:"75%"},"S8":{t:"30%",l:"92%"},"S9":{t:"60%",l:"92%"},"S10":{t:"90%",l:"75%"}};
+        const pathKeys = Object.keys(points);
+
+        let counts = {total:0, can:0, bat:0, scrap:0, paper:0, plastic:0, hourly:{}};
+        let robotBattery = 100;
+        let virtualRobot = {idx:0, active:false, bat:95}; // 시뮬레이션 기본값 꺼둠
+        let hourlyChart;
+
+        window.onload = function() {
+            // 카메라 연결 (에러나도 UI 깨지지 않게 처리됨)
+            document.getElementById("cam-1").src = `http://${ROBOT_IP}:8000/stream.mjpg?t=${Date.now()}`;
+            document.getElementById("cam-2").src = `http://${CONVEYOR_IP}:8001/stream.mjpg?t=${Date.now()}`;
+            
+            setInterval(() => document.getElementById("clock").innerText = new Date().toLocaleTimeString(), 1000);
+
+            // 맵 마커 생성
+            const mapArea = document.getElementById("map-area");
+            for(const [k, v] of Object.entries(points)) {
+                let m = document.createElement("div"); m.className = "marker"; m.style.top = v.t; m.style.left = v.l;
+                m.innerHTML = `<div class="marker-dot"></div><div class="marker-label">${k}</div>`;
+                mapArea.appendChild(m);
+            }
+
+            initBarChart();
+            
+            // ★ 핵심: 1초마다 데이터 가져오기 실행
+            setInterval(fetchData, 1000); 
+            setInterval(simVirtual, 2000);
+        };
+
+        // --- 그래프 관련 함수 (유지) ---
+        function initBarChart() {
+            const ctx = document.getElementById('hourlyChart').getContext('2d');
+            const labels = Array.from({length: 24}, (_, i) => i + "h");
+            hourlyChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Production Count',
+                        data: new Array(24).fill(0),
+                        backgroundColor: '#00d2ff',
+                        borderRadius: 4,
+                        barPercentage: 0.6
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#666', font: {size: 10} } },
+                        y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#aaa', stepSize: 1 } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+        function updateBarChart(hourlyData) {
+            if(!hourlyData) return;
+            const data = Array.from({length: 24}, (_, i) => hourlyData[i.toString()] || 0);
+            hourlyChart.data.datasets[0].data = data;
+            hourlyChart.update();
+        }
+
+        // ★★★ [핵심 수정] 데이터를 가져와서 화면을 갱신하는 함수 ★★★
+        function fetchData() {
+            // 1. 컨베이어 통계 가져오기
+            fetch(URL_STATS).then(r => r.json()).then(d => {
+                if(d.total > counts.total) {
+                    let diffType = "Item";
+                    if(d.can > counts.can) diffType = "CAN";
+                    else if(d.bat > counts.bat) diffType = "BATTERY";
+                    else if(d.scrap > counts.scrap) diffType = "SCRAP";
+                    else if(d.paper > counts.paper) diffType = "PAPER";
+                    else if(d.plastic > counts.plastic) diffType = "PLASTIC";
+                    addTableLog(diffType, d.total);
+                }
+                counts = d;
+                updateUI();
+                updateBarChart(d.hourly);
+            }).catch(e=>{ /* 컨베이어 꺼져있을 때 에러 무시 */ });
+
+            // 2. Mobius에서 로봇 위치 가져오기 (이 부분이 없어서 안 움직였던 것임)
+            fetch(URL_STATUS, { headers: MOBIUS_HEADERS })
+                .then(r => r.json())
+                .then(data => {
+                    // Mobius 데이터 구조: {"m2m:cin": {"con": "S4", ...}}
+                    if (data["m2m:cin"] && data["m2m:cin"].con) {
+                        let location = data["m2m:cin"].con;
+                        // console.log("로봇 위치 수신:", location); // 디버깅용
+                        moveRealRobot(location);
+                    }
+                })
+                .catch(e => {
+                   // console.log("Mobius 연결 실패(위치):", e); 
+                });
+
+            // 3. Mobius에서 배터리 정보 가져오기
+            fetch(URL_BATTERY, { headers: MOBIUS_HEADERS })
+                .then(r => r.json())
+                .then(data => {
+                    if (data["m2m:cin"] && data["m2m:cin"].con) {
+                        robotBattery = parseInt(data["m2m:cin"].con);
+                    }
+                })
+                .catch(e => {});
+        }
+
+        // ★★★ [추가됨] 실제 로봇 아이콘(robot-1) 움직이는 함수 ★★★
+        function moveRealRobot(locationName) {
+            // S1, S2 같은 이름이 points 목록에 있는지 확인
+            if (points[locationName]) {
+                const robot = document.getElementById("robot-1");
+                robot.style.top = points[locationName].t;
+                robot.style.left = points[locationName].l;
+                
+                // 마커에 도착 효과 (선택사항)
+                // robot.style.transform = "scale(1.2)";
+                // setTimeout(() => robot.style.transform = "scale(1)", 200);
+            }
+        }
+
+        function addTableLog(type, total) {
+            const tbody = document.getElementById("log-body");
+            const row = document.createElement("tr");
+            const time = new Date().toLocaleTimeString();
+            let color = "#fff";
+            if(type==="BATTERY") color = "var(--danger)";
+            else if(type==="CAN") color = "var(--can)";
+            row.innerHTML = `<td>${time}</td><td style="color:${color}; font-weight:bold;">${type}</td><td>${total}</td>`;
+            tbody.insertBefore(row, tbody.firstChild);
+            if(tbody.children.length > 20) tbody.removeChild(tbody.lastChild);
+        }
+
+        function downloadCSV() { window.location.href = URL_DOWNLOAD; }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('page-' + tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+        function simVirtual() {
+            if(!virtualRobot.active) return;
+            virtualRobot.idx = (virtualRobot.idx + 1) % pathKeys.length;
+            const k = pathKeys[virtualRobot.idx];
+            const r2 = document.getElementById("robot-2");
+            r2.style.top = points[k].t; r2.style.left = points[k].l;
+            virtualRobot.bat = (virtualRobot.bat - 1 < 10) ? 100 : virtualRobot.bat - 1;
+        }
+
+        function toggleVirtual() {
+            virtualRobot.active = !virtualRobot.active;
+            const btn = document.getElementById("sim-btn");
+            btn.className = virtualRobot.active ? "sim-btn on" : "sim-btn";
+            btn.innerText = virtualRobot.active ? "SIMULATION: ON" : "SIMULATION: PAUSED";
+        }
+
+        function openModal(type) {
+            document.getElementById("modal").style.display = "flex";
+            if(type === 'real') {
+                document.getElementById("m-id").innerText = "AGV-01 (Main)";
+                document.getElementById("m-type").innerText = "Physical Robot";
+                document.getElementById("m-status").innerText = "Online";
+                document.getElementById("m-bat").innerText = robotBattery + "%";
+            } else {
+                document.getElementById("m-id").innerText = "SIM-BOT";
+                document.getElementById("m-type").innerText = "Virtual Simulation";
+                document.getElementById("m-status").innerText = "Circulating";
+                document.getElementById("m-bat").innerText = virtualRobot.bat + "%";
+            }
+        }
+
+        function updateUI() {
+            document.getElementById("val-total").innerText = counts.total;
+            document.getElementById("val-can").innerText = counts.can;
+            document.getElementById("val-bat").innerText = counts.bat;
+            document.getElementById("val-scrap").innerText = counts.scrap;
+            document.getElementById("val-paper").innerText = counts.paper || 0;
+            document.getElementById("val-plas").innerText = counts.plastic || 0;
+        }
+
+        function confirmAction(act) {
+            let color = (act==='STOP')?'#ff4757':(act==='RESUME')?'#2ed573':'#333';
+            Swal.fire({
+                title: act, text: "Execute command?", icon: 'warning',
+                showCancelButton: true, confirmButtonColor: color, background: '#25252b', color:'#fff'
+            }).then((res) => {
+                if(res.isConfirmed) {
+                    if(act==='RESET') {
+                        fetch(URL_RESET, {method:'POST'}).then(()=>{ 
+                            counts={total:0,can:0,bat:0,scrap:0,paper:0,plastic:0,hourly:{}}; 
+                            updateUI(); updateBarChart({});
+                            document.getElementById("log-body").innerHTML = "";
+                        });
+                    } else {
+                        let cmd = (act==='STOP') ? "EMERGENCY_STOP" : "RESUME";
+                        fetch(URL_CMD, {
+                            method:"POST",
+                            headers:{
+                                'X-M2M-RI':'12345',
+                                'X-M2M-Origin':'SbDasq',
+                                'Content-Type':'application/vnd.onem2m-res+json; ty=4'
+                            },
+                            body:JSON.stringify({"m2m:cin":{"con":cmd}})
+                        });
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
