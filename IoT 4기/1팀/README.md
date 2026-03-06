@@ -1,4 +1,4 @@
-<img width="2879" height="1634" alt="KDT_SEF_Dashboard3" src="https://github.com/user-attachments/assets/4290469a-6d25-46be-95cd-48443279d346" />![컨베이어3](https://github.com/user-attachments/assets/43de1209-8665-481b-a270-7e02db88a4ea)🏭 AIoT 기반 자율 순찰 및 스마트 자원 순환 시스템
+🏭 AIoT 기반 자율 순찰 및 스마트 자원 순환 시스템
 
 #1. 📖 프로젝트 개요
 본 프로젝트는 제조 및 건설 현장의 자원 수거/분류 과정에서 발생하는 인력 의존성과 안전 사고 문제를 해결하기 위해 개발되었습니다.
