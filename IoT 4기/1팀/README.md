@@ -1,4 +1,4 @@
-🏭 AIoT 기반 자율 순찰 및 스마트 자원 순환 시스템
+<img width="2879" height="1634" alt="KDT_SEF_Dashboard3" src="https://github.com/user-attachments/assets/4290469a-6d25-46be-95cd-48443279d346" />![컨베이어3](https://github.com/user-attachments/assets/43de1209-8665-481b-a270-7e02db88a4ea)🏭 AIoT 기반 자율 순찰 및 스마트 자원 순환 시스템
 
 #1. 📖 프로젝트 개요
 본 프로젝트는 제조 및 건설 현장의 자원 수거/분류 과정에서 발생하는 인력 의존성과 안전 사고 문제를 해결하기 위해 개발되었습니다.
@@ -36,21 +36,39 @@
 - M2M 연동: AGV 로봇(하역 완료) ➡️ Mobius 서버(트리거 발행) ➡️ Smart Sorter(분류 셔틀 작동)로 이어지는 유기적인 프로세스 구축.
 
 #4. 서버 구축
-<img<img width="864" height="1475" alt="AE_CNT" src="https://github.com/user-attachments/assets/3a361ed5-73b7-4688-99b7-4f1b5d8c5ade" />
- width="2268" height="496" alt="PostgreSQL" src="https://github.com/user-attachments/assets/3e4fb893-9025-4ddf-b912-e25c53a9a728" />
-<img width="1179" height="1530" alt="모비우스4버전_터미널" src="https://github.com/user-attachments/assets/c83e7d72-b47a-4c4a-8b3d-fd89245f6603" />
+##PostgreSQL
+<img width="2268" height="496" alt="PostgreSQL" src="https://github.com/user-attachments/assets/e8ea55d5-41d6-479d-8925-1d54a0510e11" />
+
+##AE_CNT
+<img width="864" height="1475" alt="AE_CNT" src="https://github.com/user-attachments/assets/1cea7c94-40bd-4507-9767-7d470b58e6f1" />
+
+##Terminal
+<img width="1179" height="1530" alt="모비우스4버전_터미널" src="https://github.com/user-attachments/assets/e61b8c85-9f3f-4d94-985f-6b72ede70b93" />
 
 
 #5. 프로젝트 하드웨어 및 시스템 시각 자료.
 ##하드웨어
-![로봇4](https://github.com/user-attachments/assets/256ebd54-970e-4710-a82e-cc3ab9cc1608)
-![로봇3](https://g![컨베이어2](https://github.com/user-attachments/assets/70589613-e526-4cf3-8038-585479f27ae7)
-ithub.com/user-attach![컨베이어3](https://github.com/user-attachments/assets/af30f802-a84a-4c52-b2ad-2cca03df1519)
-ments/assets/9014053a-a560-499a-9070-86707262bd20)
+###Robot1
+![로봇4](https://github.com/user-attachments/assets/8e2717c4-6353-4ca2-8b37-758b59662edc)
+
+###Robot2
+![로봇3](https://github.com/user-attachments/assets/b7993fbd-5113-483b-a83c-6074bd3a6d58)
+
+
+###Convetor1
+![컨베이어2](https://github.com/user-attachments/assets/4b418226-6bc9-4d67-9087-744e003f60a7)
+
+###Convetor2
+![컨베이어3](https://github.com/user-attachments/assets/f5160a9b-127c-41c1-9c8b-7bf9fa1e266d)
+
 
 ## 대시보드
-<img width="2879" height="1673" alt="대시보드1" src="https://github.com/user-attachments/assets/7d9c4448-2e03-4770-b230-e6580b428bf0" />
-<img width="2879" height="1611" alt="KDT_SEF_Dashboard1" src="https://github.com/user-attachments/assets/70a60b7d-1402-43bc-900e-42d5412ba047" />
-<img width="2879" height="1634" alt="KDT_SEF_Dashboard3" src="https://github.com/user-attachments/assets/dd9eecae-12a1-410f-a37c-83f66c646aa5" />
+###dash1
+<img width="2879" height="1673" alt="대시보드1" src="https://github.com/user-attachments/assets/09d51fbe-a897-4ae2-b727-0856de8d3c2d" />
 
+###dash2
+<img width="2879" height="1611" alt="KDT_SEF_Dashboard1" src="https://github.com/user-attachments/assets/e9ec8547-0aec-4a36-92ab-fb83b003af99" />
+
+###dash3
+<img width="2879" height="1634" alt="KDT_SEF_Dashboard3" src="https://github.com/user-attachments/assets/db45d375-c366-45e0-8ec2-4bada1449682" />
 
