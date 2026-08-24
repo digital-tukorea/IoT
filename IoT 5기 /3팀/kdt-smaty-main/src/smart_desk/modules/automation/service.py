@@ -1,0 +1,1727 @@
+"""The single owner of automatic desk intent, session changes, and commands."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+from typing import Protocol
+
+from smart_desk.config.settings import AutomationSettings
+from smart_desk.modules.automation.models import (
+    AutomationSnapshot, AutomationState, ControlMode, HeightPolicy, IntentSource,
+)
+from smart_desk.modules.identity.models import CurrentUserSnapshot, SessionKind
+from smart_desk.modules.desk.models import (
+    DeskSnapshot, DeskState, Direction, HeightStatus, RelayEvent, RelayState,
+)
+from smart_desk.modules.profiles.activity_modes import (
+    ActivityModeNotFoundError, ActivityModeOwnershipError, effective_mode_from_activity,
+)
+from smart_desk.modules.profiles.led_schedule import LedSchedule, parse_schedule
+from smart_desk.modules.profiles.models import ActivityMode, EffectiveActivityMode, Profile
+from smart_desk.modules.vision.models import (
+    BlockCode, PresenceStatus, PostureStatus, VisionSnapshot,
+)
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+class AutomationConflictError(RuntimeError):
+    """A user-bound command referred to a non-current session or profile."""
+
+
+class AutomationNotFoundError(RuntimeError):
+    """An activity mode does not exist."""
+
+
+class CurrentUserPort(Protocol):
+    async def snapshot(self) -> CurrentUserSnapshot | None: ...
+    async def is_current(self, session_id: str) -> bool: ...
+    async def subscribe(self, callback: Callable[[object], object]) -> Callable[[], Awaitable[None]]: ...
+
+
+class VisionPort(Protocol):
+    def get_snapshot(self) -> VisionSnapshot: ...
+
+
+class ActivityModePort(Protocol):
+    async def list_effective_modes(self, profile_id: str) -> list[EffectiveActivityMode]: ...
+    async def get_mode_for_profile(
+        self, profile_id: str, mode_id: str
+    ) -> tuple[ActivityMode, Profile]: ...
+    async def delete_mode(self, mode_id: str) -> None: ...
+
+
+class DeskPort(Protocol):
+    async def set_target(self, height_cm: float) -> None: ...
+    async def stop_motion(self, reason: str = "") -> None: ...
+    async def hold_up(self) -> None: ...
+    async def hold_down(self) -> None: ...
+    def get_snapshot(self) -> DeskSnapshot: ...
+
+
+class WledPort(Protocol):
+    async def set_solid(self, color: str) -> None: ...
+    async def set_brightness(self, brightness: int) -> None: ...
+    async def turn_off(self) -> None: ...
+
+
+# 작업 모드가 조명에 지시하는 한 벌. 밝기가 None이면 지금 밝기를 그대로 둔다.
+LedSetting = tuple[str | None, int | None]
+
+
+class ActivityModeUsagePort(Protocol):
+    async def start_interval(self, profile_id: str, mode_key: str, mode_name: str) -> None: ...
+    async def close_open_intervals(self, profile_id: str | None = None) -> None: ...
+
+
+class AnnouncerPort(Protocol):
+    """스피커로 짧은 알림을 말해 주는 쪽. 부르는 자리를 붙잡지 않는다."""
+
+    def say_soon(self, text: str) -> None: ...
+
+
+class GreetingPort(Protocol):
+    """알아본 사용자에게 먼저 말을 거는 쪽. 부르는 자리를 붙잡지 않는다."""
+
+    def greet(self, profile_id: str | None) -> None: ...
+
+
+class TiltPort(Protocol):
+    """상판 틸팅을 단계로 움직이는 쪽."""
+
+    async def set_target(self, level: int) -> None: ...
+    async def stop_motion(self, reason: str = "") -> None: ...
+
+
+class AutomationService:
+    """Serializes commands separately from short snapshot mutations.
+
+    The state lock protects only replacement of ``AutomationSnapshot`` and task
+    ownership.  All repository, session, Desk, and WLED waits happen outside it.
+    """
+
+    def __init__(
+        self, *, current_user: CurrentUserPort, vision: VisionPort,
+        activity_modes: ActivityModePort, desk: DeskPort, settings: AutomationSettings,
+        wled: WledPort | None = None, target_tolerance_cm: float = 0.5,
+        usage: ActivityModeUsagePort | None = None,
+        mode_memory_seconds: float = 1800.0,
+        utc_now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        now = utc_now()
+        self._users = current_user
+        self._vision = vision
+        self._modes = activity_modes
+        self._desk = desk
+        self._settings = settings
+        self._wled = wled
+        self._target_tolerance_cm = target_tolerance_cm
+        self._utc_now = utc_now
+        self._monotonic = monotonic
+        self._snapshot = AutomationSnapshot(
+            None, None, None, AutomationState.WAITING_USER, None, None, None,
+            None, None, (), None, None, 0, 0, "STARTUP", "SYSTEM", now, now,
+        )
+        self._state_lock = asyncio.Lock()
+        self._command_lock = asyncio.Lock()
+        self._lifecycle_lock = asyncio.Lock()
+        self._wake = asyncio.Event()
+        self._loop_task: asyncio.Task[None] | None = None
+        self._dispatch_task: asyncio.Task[None] | None = None
+        self._wled_task: asyncio.Task[None] | None = None
+        self._wled_sequence = 0
+        self._wled_io_lock = asyncio.Lock()
+        self._unsubscribe: Callable[[], Awaitable[None]] | None = None
+        self._running = False
+        self._candidate_started_mono: float | None = None
+        # 후보와 다른 자세가 처음 보인 시각. 잠깐 스친 것인지 가리는 데 쓴다.
+        self._contrary_since_mono: float | None = None
+        self._candidate_pair: tuple[float, float] | None = None
+        self._last_pair: tuple[float, float] | None = None
+        # 안정 자세 확인 중 Vision이 잠깐 불확실해진 시작 시각. 복구되면 이
+        # 구간만큼 후보 deadline을 뒤로 밀어, 끊긴 시간을 자세 유지로 세지 않는다.
+        self._vision_uncertain_since_mono: float | None = None
+        self._usage = usage
+        # 음성은 automation보다 늦게 조립된다. 준비되면 set_greeter로 끼운다.
+        self._greeter: GreetingPort | None = None
+        # 틸팅 하드웨어는 없을 수 있다. 있으면 set_tilt로 끼운다.
+        self._tilt: TiltPort | None = None
+        self._tilt_task: asyncio.Task[None] | None = None
+        self._park_tilt_level = 0
+        self._park_tilt_requested = False
+        self._announcer: AnnouncerPort | None = None
+        # 같은 높이를 두 번 말하지 않도록 마지막으로 알린 목표를 기억한다.
+        self._announced_target_cm: float | None = None
+        # 지금 걸린 모드의 조명 스케줄과, 그 모드를 켠 시각. 스케줄은 모드가
+        # 바뀔 때만 해석하고, 그 뒤로는 구간이 넘어갈 때만 조명을 다시 보낸다.
+        self._active_schedule: LedSchedule | None = None
+        self._mode_started_mono: float | None = None
+        self._schedule_applied: tuple[str, int] | None = None
+        # 자리를 비워도 잠깐이면 쓰던 모드로 돌아오게 profile별로 기억한다.
+        # 기억하는 동안 사용 시간은 늘지 않는다(구간을 닫아 두기 때문이다).
+        self._mode_memory_seconds = mode_memory_seconds
+        self._remembered_mode: dict[str, tuple[str, float]] = {}
+        self._park_started_mono: float | None = None
+        self._park_pair: tuple[float, float] | None = None
+        self._startup_pair: tuple[float, float] | None = None
+        self._live_automatic = False
+        self._auto_completed_target_cm: float | None = None
+        self._auto_rearm_started_mono: float | None = None
+        self._vision_recovery_baseline_required = False
+        # Session kind is transition state, not a derived profile property: an
+        # anonymous-to-registered confirmation has a deliberately different
+        # AUTO contract from every other session replacement.
+        self._session_kind: SessionKind | None = None
+        self._session_profile_id: str | None = None
+
+    def get_snapshot(self) -> AutomationSnapshot:
+        return self._snapshot
+
+    async def start(self) -> None:
+        async with self._lifecycle_lock:
+            if self._running:
+                return
+            try:
+                unsubscribe = await self._users.subscribe(self._on_session_change)
+            except Exception:
+                self._running = False
+                raise
+            self._unsubscribe = unsubscribe
+            self._running = True
+            self._startup_pair = self._pair(self._vision.get_snapshot())
+            self._loop_task = asyncio.create_task(self._run_loop(), name="desk-automation")
+            self._wake.set()
+
+    async def stop(self) -> None:
+        async with self._lifecycle_lock:
+            if not self._running and self._unsubscribe is None:
+                return
+            self._running = False
+            unsubscribe, self._unsubscribe = self._unsubscribe, None
+            if unsubscribe is not None:
+                await unsubscribe()
+            async with self._state_lock:
+                live = self._invalidate_locked("LIFECYCLE_STOP")
+                loop_task, self._loop_task = self._loop_task, None
+                led_task, self._wled_task = self._wled_task, None
+                tilt_task, self._tilt_task = self._tilt_task, None
+                self._set_waiting_locked("LIFECYCLE_STOP")
+            for task in (loop_task, led_task, tilt_task):
+                if task is not None:
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (loop_task, led_task, tilt_task) if task is not None),
+                return_exceptions=True,
+            )
+            if live:
+                await self._safe_stop("자동화 종료 안전 정지")
+
+    def set_announcer(self, announcer: AnnouncerPort | None) -> None:
+        """높이 변경을 말해 줄 쪽을 끼운다. 음성이 꺼져 있으면 None으로 둔다."""
+
+        self._announcer = announcer
+
+    def set_greeter(self, greeter: GreetingPort | None) -> None:
+        """인사를 건넬 쪽을 끼운다. 음성이 꺼져 있으면 None으로 둔다."""
+
+        self._greeter = greeter
+
+    def set_tilt(self, tilt: TiltPort | None, *, park_level: int = 0) -> None:
+        """틸팅을 움직일 쪽을 끼운다. 하드웨어가 없으면 None으로 둔다."""
+
+        self._tilt = tilt
+        self._park_tilt_level = park_level
+
+    def _on_session_change(self, _event: object) -> None:
+        self._wake.set()
+
+    async def hold(self, direction: Direction, expected_session_id: str | None = None) -> None:
+        async with self._command_lock:
+            live = await self._make_manual("HOLD", expected_session_id)
+            self._raise_if_stop_failed()
+            await self._preempt_for_manual_command(
+                expected_session_id, live, "수동 HOLD가 자동 이동을 선점했습니다."
+            )
+            # A Voice turn can become stale while a preemption STOP is in
+            # flight.  Never let its HOLD become the new user's command.
+            await self._validate_expected_session(expected_session_id)
+            if direction is Direction.UP:
+                await self._desk.hold_up()
+            else:
+                await self._desk.hold_down()
+
+    async def set_target(self, target_cm: float, expected_session_id: str | None = None) -> None:
+        async with self._command_lock:
+            live = await self._make_manual("SET_TARGET", expected_session_id)
+            self._raise_if_stop_failed()
+            await self._preempt_for_manual_command(
+                expected_session_id, live, "직접 목표가 자동 이동을 선점했습니다."
+            )
+            # Keep the sessionless Dashboard command path unchanged, while a
+            # user-bound caller is checked at the final physical boundary.
+            await self._validate_expected_session(expected_session_id)
+            self._announce_height(target_cm, automatic=False)
+            await self._desk.set_target(target_cm)
+
+    async def stop_motion(self, reason: str = "사용자 STOP") -> None:
+        """User STOP never waits for a background target and exposes Desk errors."""
+        async with self._command_lock:
+            async with self._state_lock:
+                self._invalidate_locked("USER_STOP")
+                if self._snapshot.session_id is not None:
+                    self._replace_locked(control_mode=ControlMode.MANUAL,
+                                         state=AutomationState.MANUAL,
+                                         intent_source=IntentSource.MANUAL,
+                                         blocked_reason_codes=())
+                else:
+                    self._set_waiting_locked("USER_STOP")
+            try:
+                await self._desk.stop_motion(reason)
+            except Exception:
+                await self._mark_stop_failed()
+                raise
+            async with self._state_lock:
+                if self._snapshot.session_id is not None:
+                    self._replace_locked(
+                        state=AutomationState.MANUAL,
+                        blocked_reason_codes=self._without_stop_failure(),
+                    )
+                else:
+                    # A successful explicit STOP is the recovery action for a
+                    # session-less safety latch too.  Unlike a session-bound
+                    # STOP it must not manufacture a MANUAL selection.
+                    self._replace_locked(
+                        state=AutomationState.WAITING_USER,
+                        height_policy=None,
+                        blocked_reason_codes=self._without_stop_failure(),
+                    )
+
+    async def set_control_mode(self, mode: ControlMode, expected_session_id: str | None) -> None:
+        # None은 Dashboard/HTTP와 음성이 공유하는 identity 비의존 경로다.
+        # 제어 방식 전환은 프로필을 읽지 않으므로 사용자 없이도 받는다.
+        async with self._command_lock:
+            if expected_session_id is not None:
+                current = await self._users.snapshot()
+                if current is None or current.session_id != expected_session_id:
+                    raise AutomationConflictError("SESSION_MISMATCH")
+            async with self._state_lock:
+                if expected_session_id is not None and self._snapshot.session_id != expected_session_id:
+                    raise AutomationConflictError("SESSION_MISMATCH")
+                live = self._invalidate_locked("CONTROL_MODE")
+                blocked = self._with_stop_failure(())
+                state = (AutomationState.BLOCKED if "DESK_STOP_FAILED" in blocked else
+                         AutomationState.MANUAL if mode is ControlMode.MANUAL else AutomationState.OBSERVING)
+                self._replace_locked(control_mode=mode, state=state,
+                                     intent_source=None, target_height_cm=None,
+                                     posture_candidate=None, candidate_since=None,
+                                     initial_move_due_at=None, park_due_at=None,
+                                     blocked_reason_codes=blocked)
+                if mode is ControlMode.AUTO:
+                    self._last_pair = self._pair(self._vision.get_snapshot())
+            # Re-AUTO must STOP even shadow intent: it is a command contract.
+            # Deliberately propagate a user-visible STOP failure while preserving
+            # the selected AUTO intent for the next observation.
+            if live or mode is ControlMode.AUTO:
+                await self._stop_or_block("제어 방식 전환 전 정지")
+
+    async def set_activity_mode(
+        self, key: str, expected_session_id: str | None, *, profile_id: str | None = None
+    ) -> None:
+        """Select an activity mode for the session owner, or for ``profile_id``.
+
+        음성은 얼굴 인식이 끊긴 동안에도 모드를 바꿀 수 있어야 한다. 그때는
+        session 소유권 대신 부르는 쪽이 고른 profile을 그대로 쓴다. session을
+        넘긴 호출은 예전처럼 소유권을 끝까지 검사한다.
+        """
+        async with self._command_lock:
+            current = await self._users.snapshot()
+            if expected_session_id is not None:
+                if (current is None or current.session_id != expected_session_id
+                        or current.kind is not SessionKind.REGISTERED or current.profile_id is None):
+                    raise AutomationConflictError("SESSION_MISMATCH")
+                owner_profile_id = current.profile_id
+            else:
+                if profile_id is None:
+                    raise AutomationConflictError("SESSION_MISMATCH")
+                owner_profile_id = profile_id
+            selected = await self._read_mode(owner_profile_id, key)
+            if expected_session_id is not None and not await self._users.is_current(expected_session_id):
+                raise AutomationConflictError("SESSION_MISMATCH")
+            async with self._state_lock:
+                if expected_session_id is not None and self._snapshot.session_id != expected_session_id:
+                    raise AutomationConflictError("SESSION_MISMATCH")
+                control = self._snapshot.control_mode or ControlMode.AUTO
+                live = self._invalidate_locked("ACTIVITY_MODE") if control is ControlMode.AUTO else False
+                state = (AutomationState.BLOCKED if "DESK_STOP_FAILED" in self._snapshot.blocked_reason_codes
+                         else AutomationState.OBSERVING if control is ControlMode.AUTO
+                         else AutomationState.MANUAL)
+                self._replace_locked(activity_mode=selected,
+                                     state=state,
+                                     intent_source=None, target_height_cm=None,
+                                     posture_candidate=None, candidate_since=None,
+                                     initial_move_due_at=None,
+                                     blocked_reason_codes=self._with_stop_failure(()))
+                if control is ControlMode.AUTO:
+                    self._last_pair = self._pair(self._vision.get_snapshot())
+            # Mode selection and its LED are committed independently of the
+            # Desk preemption outcome; a failed STOP must not roll either back.
+            self._queue_led(*self._install_mode_lighting(selected))
+            # 모드를 고른 것은 그 모드의 각도로 가겠다는 뜻이다. session 설치와
+            # 달리 여기서는 사용자가 방금 직접 고른 것이므로 항상 옮긴다.
+            self._apply_mode_tilt(selected)
+            self._remember_mode(owner_profile_id, selected.key)
+            await self._begin_usage(owner_profile_id, selected)
+            if live:
+                await self._stop_or_block("작업 모드 변경 전 정지")
+
+    async def delete_activity_mode(self, mode_id: str) -> None:
+        """Serialize delete with mode selection to make the active guard atomic."""
+        async with self._command_lock:
+            snapshot = self._snapshot
+            if snapshot.activity_mode and snapshot.activity_mode.editable and snapshot.activity_mode.key == mode_id:
+                raise AutomationConflictError("ACTIVE_ACTIVITY_MODE")
+            await self._modes.delete_mode(mode_id)
+
+    async def is_active_custom_mode(self, mode_id: str) -> bool:
+        snapshot = self._snapshot
+        return bool(snapshot.activity_mode and snapshot.activity_mode.editable and snapshot.activity_mode.key == mode_id)
+
+    async def _read_mode(self, profile_id: str, key: str) -> EffectiveActivityMode:
+        if key == "default":
+            modes = await self._modes.list_effective_modes(profile_id)
+            for mode in modes:
+                if mode.key == "default":
+                    return mode
+            raise AutomationNotFoundError("기본 작업 모드를 찾을 수 없습니다.")
+        try:
+            mode, profile = await self._modes.get_mode_for_profile(profile_id, key)
+        except ActivityModeNotFoundError as error:
+            raise AutomationNotFoundError("작업 모드를 찾을 수 없습니다.") from error
+        except ActivityModeOwnershipError as error:
+            raise AutomationConflictError("ACTIVITY_MODE_OWNERSHIP") from error
+        return effective_mode_from_activity(mode, profile)
+
+    async def _make_manual(self, reason: str, expected_session_id: str | None = None) -> bool:
+        # This validation deliberately does not hold the current-user lock
+        # across Desk I/O.  Every later physical boundary revalidates instead,
+        # so session replacement remains quick and stale commands cannot act.
+        await self._validate_expected_session(expected_session_id)
+        async with self._state_lock:
+            # The first check released this lock.  A session replacement can
+            # install B in that gap, so A must not invalidate or mark B's
+            # snapshot MANUAL before the later Desk-bound checks reject it.
+            if (expected_session_id is not None
+                    and self._snapshot.session_id != expected_session_id):
+                raise AutomationConflictError("SESSION_MISMATCH")
+            live = self._invalidate_locked(reason)
+            if self._snapshot.session_id is not None:
+                state = (AutomationState.BLOCKED if "DESK_STOP_FAILED" in self._snapshot.blocked_reason_codes
+                         else AutomationState.MANUAL)
+                self._replace_locked(control_mode=ControlMode.MANUAL, state=state,
+                                     intent_source=IntentSource.MANUAL, target_height_cm=None,
+                                     blocked_reason_codes=self._with_stop_failure(()))
+            else:
+                self._set_waiting_locked(reason)
+            return live
+
+    async def _validate_expected_session(self, expected_session_id: str | None) -> None:
+        """Require both current-user and automation ownership when supplied.
+
+        ``None`` is intentionally the Dashboard/HTTP compatibility path: it
+        is identity-independent and remains usable with no active session.
+        """
+        if expected_session_id is None:
+            return
+        current = await self._users.snapshot()
+        if current is None or current.session_id != expected_session_id:
+            raise AutomationConflictError("SESSION_MISMATCH")
+        async with self._state_lock:
+            if self._snapshot.session_id != expected_session_id:
+                raise AutomationConflictError("SESSION_MISMATCH")
+
+    async def _preempt_for_manual_command(
+        self, expected_session_id: str | None, live: bool, reason: str,
+    ) -> None:
+        """Preserve a needed safety STOP but reject stale manual side effects."""
+        try:
+            await self._validate_expected_session(expected_session_id)
+        except AutomationConflictError:
+            if live:
+                # The old AUTO target may still be moving.  STOP is a safety
+                # action, so it survives the same race that rejects HOLD/target.
+                await self._safe_stop(reason)
+            raise
+        if live:
+            # A user command must not run after its required preemption STOP
+            # failed.  _make_manual deliberately happened first, so the caller
+            # can safely retry from the preserved MANUAL state.
+            await self._stop_or_block(reason)
+
+    async def _run_loop(self) -> None:
+        while self._running:
+            try:
+                await self._observe_once()
+                await self._clear_observation_error()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # 프로필 DB나 Vision snapshot을 한 번 읽지 못한 것은 진행 중인
+                # 물리 이동을 취소할 이유가 아니다. 다음 관측에서 자연 복구한다.
+                await self._record_observation_error()
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=0.1)
+            except TimeoutError:
+                pass
+            self._wake.clear()
+
+    async def _observe_once(self) -> None:
+        self._tick_led_schedule()
+        await self._recover_stop_failure_if_confirmed()
+        await self._recover_desk_error_if_ready()
+        current = await self._users.snapshot()
+        vision = self._vision.get_snapshot()
+        snapshot = self._snapshot
+        if current is None:
+            if snapshot.session_id is not None:
+                # 얼굴/재실 session은 이동 의도를 고르는 데만 사용한다. 이미
+                # DeskController가 받은 목표는 얼굴이 사라져도 끝까지 수행한다.
+                await self._finish_automatic_if_idle(snapshot.session_id)
+                if self._automatic_desk_in_progress():
+                    return
+                await self._end_session(snapshot.session_id)
+            await self._observe_park(vision)
+            return
+        await self._cancel_park_if_needed()
+        if snapshot.session_id != current.session_id:
+            activity: EffectiveActivityMode | None = None
+            failure: str | None = None
+            if current.kind is SessionKind.REGISTERED:
+                # 잠깐 자리를 비운 것이면 쓰던 모드로 돌아온다. 기억이 만료됐거나
+                # 그 모드가 사라졌으면 기본 모드로 되돌린다.
+                remembered = self._recall_mode(current.profile_id)
+                for key in ([remembered] if remembered else []) + ["default"]:
+                    try:
+                        activity = await self._read_mode(current.profile_id or "", key)
+                        failure = None
+                        break
+                    except Exception:
+                        failure = "DEFAULT_ACTIVITY_MODE_UNAVAILABLE"
+            if not await self._users.is_current(current.session_id):
+                return
+            installed = await self._install_session(
+                current, activity, failure, self._vision.get_snapshot()
+            )
+            if installed:
+                # Ordinary replacements establish a baseline for the 2-second
+                # initial candidate.  An anonymous upgrade instead schedules
+                # its Identity-stabilized posture in _install_session.
+                return
+        if current.kind is SessionKind.REGISTERED and self._snapshot.activity_mode is None:
+            await self._recover_activity_mode(current)
+            if self._snapshot.activity_mode is None:
+                return
+        await self._observe_auto(current, vision)
+
+    async def _recover_activity_mode(self, current: CurrentUserSnapshot) -> None:
+        """Retry a transient profile-mode read without leaving AUTO blocked forever."""
+
+        remembered = self._recall_mode(current.profile_id)
+        selected: EffectiveActivityMode | None = None
+        for key in ([remembered] if remembered else []) + ["default"]:
+            try:
+                selected = await self._read_mode(current.profile_id or "", key)
+                break
+            except Exception:
+                continue
+        if selected is None or not await self._users.is_current(current.session_id):
+            return
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if snapshot.session_id != current.session_id or snapshot.activity_mode is not None:
+                return
+            codes = tuple(
+                code for code in snapshot.blocked_reason_codes
+                if code != "DEFAULT_ACTIVITY_MODE_UNAVAILABLE"
+            )
+            self._replace_locked(
+                activity_mode=selected,
+                state=(AutomationState.BLOCKED if "DESK_STOP_FAILED" in codes
+                       else AutomationState.MANUAL
+                       if snapshot.control_mode is ControlMode.MANUAL
+                       else AutomationState.OBSERVING),
+                blocked_reason_codes=codes,
+            )
+            generation = self._snapshot.generation
+        lighting = self._install_mode_lighting(selected)
+        self._remember_mode(current.profile_id, selected.key)
+        await self._begin_usage(current.profile_id, selected)
+        await self._queue_install_led(current.session_id, generation, *lighting)
+
+    async def _install_session(self, current: CurrentUserSnapshot,
+                               activity: EffectiveActivityMode | None, failure: str | None,
+                               vision: VisionSnapshot) -> bool:
+        async with self._state_lock:
+            if self._snapshot.session_id == current.session_id:
+                return False
+            anonymous_upgrade = (
+                self._session_kind is SessionKind.ANONYMOUS
+                and current.kind is SessionKind.REGISTERED
+            )
+            previous_control = self._snapshot.control_mode
+            live = self._invalidate_locked("SESSION_CHANGE")
+            control = (
+                ControlMode.MANUAL
+                if anonymous_upgrade and previous_control is ControlMode.MANUAL
+                else ControlMode.AUTO
+            )
+            unusable_upgrade = anonymous_upgrade and control is ControlMode.AUTO and not self._auto_usable(vision)
+            blocked_codes = self._with_stop_failure((failure,) if failure else ())
+            if unusable_upgrade:
+                blocked_codes = self._with_stop_failure(self._vision_codes(vision))
+            hard_blocked = "DESK_STOP_FAILED" in blocked_codes
+            self._replace_locked(session_id=current.session_id, control_mode=control,
+                                 activity_mode=activity,
+                                 state=(AutomationState.BLOCKED if hard_blocked else
+                                        AutomationState.MANUAL if control is ControlMode.MANUAL else
+                                        AutomationState.OBSERVING),
+                                 height_policy=(HeightPolicy.PROFILE_ACTIVITY_MODE if current.kind is SessionKind.REGISTERED
+                                                else HeightPolicy.ANONYMOUS_DEFAULT),
+                                 posture_candidate=None, candidate_since=None, target_height_cm=None,
+                                 intent_source=None, blocked_reason_codes=blocked_codes,
+                                 initial_move_due_at=(None if anonymous_upgrade else
+                                                      self._utc_now() + timedelta(seconds=2)),
+                                 park_due_at=None)
+            self._session_kind = current.kind
+            self._session_profile_id = current.profile_id
+            installed_profile_id, installed_mode = current.profile_id, activity
+            greet_profile_id = (
+                current.profile_id if current.kind is SessionKind.REGISTERED else None
+            )
+            self._last_pair = self._pair(vision)
+            self._vision_recovery_baseline_required = unusable_upgrade
+            expected_generation = self._snapshot.generation
+        # 아는 얼굴을 '처음' 알아본 자리인지 가린다. 쓰던 모드를 아직 기억하고
+        # 있다면 잠깐 자리를 비웠다 돌아온 것이므로 같은 방문으로 본다. 모드
+        # 기억과 같은 신호를 써서 두 시간이 어긋나지 않게 한다.
+        # (_remember_mode는 아래에서 갱신되므로 여기서는 직전 방문이 보인다.)
+        first_sighting = (
+            greet_profile_id is not None and self._recall_mode(greet_profile_id) is None
+        )
+        if first_sighting and self._greeter is not None:
+            self._greeter.greet(greet_profile_id)
+        # 처음 알아본 자리에서만 프로필의 기본 틸팅으로 맞춘다. 자리를 비웠다
+        # 돌아올 때마다 움직이면 손으로 바꿔 둔 각도를 덮어쓴다.
+        if first_sighting:
+            self._apply_mode_tilt(activity)
+        # 새 모드가 걸렸으니 조명 계획을 다시 세운다.
+        install_lighting = self._install_mode_lighting(activity)
+        # 새 session이 모드를 물고 들어온 시점부터 사용 시간을 다시 센다.
+        self._remember_mode(installed_profile_id, installed_mode.key if installed_mode else None)
+        await self._begin_usage(installed_profile_id, installed_mode)
+        if live:
+            if not await self._safe_stop("사용자 교대 안전 정지"):
+                await self._queue_install_led(
+                    current.session_id, expected_generation, *install_lighting,
+                )
+                return True
+        if not await self._queue_install_led(
+            current.session_id, expected_generation, *install_lighting,
+        ):
+            return True
+        if anonymous_upgrade and control is ControlMode.AUTO and failure is None and self._auto_usable(vision):
+            await self._schedule_upgrade_target(current, vision, expected_generation)
+        return True
+
+    async def _queue_install_led(
+        self, expected_session_id: str, expected_generation: int, color: str | None,
+        brightness: int | None = None,
+    ) -> bool:
+        """Queue an installed session's LED only while that install still owns state."""
+        if not await self._users.is_current(expected_session_id):
+            return False
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if (snapshot.session_id != expected_session_id
+                    or snapshot.generation != expected_generation):
+                return False
+            # This only queues background WLED I/O; it does not await it while
+            # holding state ownership.
+            self._queue_led_sequence(color, brightness)
+            return True
+
+    async def _schedule_upgrade_target(
+        self, current: CurrentUserSnapshot, vision: VisionSnapshot, expected_generation: int,
+    ) -> None:
+        """Apply an anonymous AUTO confirmation without restarting its timers."""
+        if not await self._users.is_current(current.session_id):
+            return
+        posture = vision.stable_posture
+        assert posture in (PostureStatus.SITTING, PostureStatus.STANDING)
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if (
+                snapshot.session_id != current.session_id
+                or snapshot.generation != expected_generation
+                or self._session_kind is not SessionKind.REGISTERED
+                or snapshot.control_mode is not ControlMode.AUTO
+                or "DESK_STOP_FAILED" in snapshot.blocked_reason_codes
+            ):
+                return
+            target = self._target_for(snapshot, posture)
+            if target is None:
+                self._replace_locked(
+                    state=AutomationState.BLOCKED,
+                    blocked_reason_codes=("ACTIVITY_MODE_UNAVAILABLE",),
+                )
+                return
+            desk_height = self._desk_height()
+            if desk_height is not None and abs(desk_height - target) <= self._target_tolerance_cm:
+                self._replace_locked(
+                    state=AutomationState.READY,
+                    target_height_cm=target,
+                    intent_source=IntentSource.AUTO,
+                    initial_move_due_at=None,
+                )
+                return
+            self._schedule_locked(target, IntentSource.AUTO, current.session_id)
+
+    async def _end_session(self, expected_session: str) -> None:
+        async with self._state_lock:
+            if self._snapshot.session_id != expected_session:
+                return
+            ended_profile = self._session_profile_id
+            ended_mode = self._snapshot.activity_mode
+            live = self._invalidate_locked("SESSION_ENDED")
+            self._set_waiting_locked("SESSION_ENDED")
+            self._session_kind = None
+            self._session_profile_id = None
+        # 쓰던 모드는 기억하되 사용 시간은 여기서 멈춘다.
+        if ended_mode is not None:
+            self._remember_mode(ended_profile, ended_mode.key)
+        await self._end_usage(ended_profile)
+        if live:
+            await self._safe_stop("사용자 session 종료 안전 정지")
+        self._queue_led(None)
+
+    async def _observe_auto(self, current: CurrentUserSnapshot, vision: VisionSnapshot) -> None:
+        snapshot = self._snapshot
+        if snapshot.session_id != current.session_id or snapshot.control_mode is not ControlMode.AUTO:
+            return
+        if "DESK_STOP_FAILED" in snapshot.blocked_reason_codes:
+            return
+        await self._finish_automatic_if_idle(current.session_id)
+        # _finish_automatic_if_idle can fail-close a live intent when the Desk
+        # reports ERROR. Do not let this same fresh vision frame overwrite that
+        # terminal state with OBSERVING or schedule another target.
+        #
+        # DESK_STOPPED_BEFORE_TARGET은 여기 넣지 않는다. 그것은 고장이 아니라
+        # "목표에 못 미치고 멈췄다"는 사실 기록이다. Vision이 잠깐 흔들려 이동이
+        # 중단되면 이 코드가 남는데, 차단 집합에 넣어 두면 아래 재개 경로에
+        # 영영 도달하지 못해 세션이 바뀔 때까지 목표와 다른 높이로 방치된다.
+        # 재개해도 _auto_usable과 자세 확인을 다시 거치고, 이미 목표 범위면
+        # READY로 끝나므로 무한 재시도가 되지 않는다.
+        if {
+            "DESK_ERROR",
+        }.intersection(self._snapshot.blocked_reason_codes):
+            return
+        if not self._auto_usable(vision):
+            if await self._hold_candidate_during_vision_uncertainty(vision):
+                return
+            await self._block_auto(vision)
+            return
+        pair = self._pair(vision)
+        if pair is None or not self._both_new(pair, self._last_pair):
+            return
+        if not await self._resume_candidate_after_vision_uncertainty(current, pair):
+            return
+        # A usable frame after an uncertainty is only a freshness baseline.
+        # It cannot contribute to the new posture hold itself.
+        if self._vision_recovery_baseline_required:
+            async with self._state_lock:
+                if (self._snapshot.session_id == current.session_id
+                        and self._snapshot.control_mode is ControlMode.AUTO
+                        and self._vision_recovery_baseline_required):
+                    self._last_pair = pair
+                    self._vision_recovery_baseline_required = False
+                    self._replace_locked(
+                        state=AutomationState.OBSERVING,
+                        blocked_reason_codes=self._with_stop_failure(()),
+                    )
+            return
+        self._last_pair = pair
+        posture = vision.stable_posture
+        assert posture in (PostureStatus.SITTING, PostureStatus.STANDING)
+        now_mono = self._monotonic()
+        desk_height = self._desk_height()
+        async with self._state_lock:
+            if self._snapshot.session_id != current.session_id or self._snapshot.control_mode is not ControlMode.AUTO:
+                return
+            fresh = self._candidate_pair is None or self._snapshot.posture_candidate is None
+            if not fresh and self._snapshot.posture_candidate is not posture:
+                # 반대 자세가 보였다. 자세 인식은 자세를 바꾸는 동안 몇 초씩
+                # 오락가락하는데, 그때마다 세던 시간을 버리면 확인이 영영 끝나지
+                # 않는다. 잠깐 스친 것은 넘기고, 그 자세가 유지될 때만 후보를 바꾼다.
+                if self._contrary_since_mono is None:
+                    self._contrary_since_mono = now_mono
+                # 유예가 확인 시간보다 길면 자세를 바꿔도 영영 확인되지 않는다.
+                grace = min(self._settings.posture_flicker_grace_seconds,
+                            self._settings.posture_confirmation_seconds)
+                if now_mono - self._contrary_since_mono < grace:
+                    return
+                fresh = True
+            if fresh:
+                self._candidate_pair = pair
+                # 자세가 실제로 바뀐 시각부터 센다. 유예만큼 늦게 알아챘다고
+                # 해서 확인 시간까지 밀리면 이동이 그만큼 더 늦어진다.
+                self._candidate_started_mono = self._contrary_since_mono or now_mono
+                self._contrary_since_mono = None
+                self._replace_locked(state=AutomationState.OBSERVING, posture_candidate=posture,
+                                     candidate_since=self._utc_now(),
+                                     initial_move_due_at=self._utc_now() + timedelta(
+                                         seconds=self._settings.posture_confirmation_seconds
+                                     ),
+                                     blocked_reason_codes=self._with_stop_failure(()))
+                # 시작 시각을 앞당겼으면 이미 확인 시간을 채웠을 수 있다. 아래
+                # 확인으로 이어가, 알아챈 순간 바로 움직이게 한다.
+            self._contrary_since_mono = None
+            assert self._candidate_started_mono is not None
+            if now_mono - self._candidate_started_mono < self._settings.posture_confirmation_seconds:
+                return
+            target = self._target_for(self._snapshot, posture)
+            if target is None:
+                self._replace_locked(state=AutomationState.BLOCKED, blocked_reason_codes=("ACTIVITY_MODE_UNAVAILABLE",))
+                return
+            if desk_height is not None and abs(desk_height - target) <= self._target_tolerance_cm:
+                self._mark_auto_target_complete_locked(target)
+                self._replace_locked(state=AutomationState.READY, target_height_cm=target,
+                                     intent_source=IntentSource.AUTO, initial_move_due_at=None,
+                                     blocked_reason_codes=self._with_stop_failure(()))
+                return
+            if self._auto_rearm_pending_locked(target, desk_height, now_mono):
+                return
+            if (
+                self._live_automatic
+                and self._snapshot.intent_source is IntentSource.AUTO
+                and self._snapshot.target_height_cm == target
+            ):
+                return
+            self._schedule_locked(target, IntentSource.AUTO, current.session_id)
+
+    def _auto_usable(self, vision: VisionSnapshot) -> bool:
+        # 사람이 여럿 보여도 자동 이동을 막지 않는다. 지나가는 사람이나 검출
+        # 흔들림으로 한 프레임만 둘이 되어도 이동이 끊겨, 목표와 다른 높이에
+        # 멈춘 채 남는 일이 잦았다. 자리에 아무도 없을 때만 이동을 보류한다.
+        if (vision.stable_presence not in (PresenceStatus.PRESENT_SINGLE,
+                                           PresenceStatus.MULTIPLE)
+                or vision.stable_posture not in (PostureStatus.SITTING,
+                                                 PostureStatus.STANDING)
+                or self._pair(vision) is None):
+            return False
+        if vision.usable:
+            return True
+        # 외부 Vision 구현이 여러 사람을 association 불가로 표시하더라도,
+        # 안정 자세 자체가 있으면 높이 정책에는 충분하다. 얼굴 식별 여부는
+        # VisionSnapshot의 usable과 별개이며 자동 높이의 차단 조건이 아니다.
+        multiplicity_only = {
+            BlockCode.MULTIPLE_PEOPLE,
+            BlockCode.COUNT_MISMATCH,
+            BlockCode.PRESENCE_NOT_SINGLE,
+        }
+        return bool(vision.reason_codes) and set(vision.reason_codes).issubset(
+            multiplicity_only
+        )
+
+    async def _hold_candidate_during_vision_uncertainty(
+        self, vision: VisionSnapshot
+    ) -> bool:
+        """Keep a confirmed posture candidate through a short camera gap."""
+
+        # 이미 Desk가 목표를 받아 움직이는 중이면 Vision은 그 이동 상태를
+        # 덮어쓰지 않는다. 완료와 안전 정지는 DeskController만 판단한다.
+        if self._live_automatic:
+            return True
+        # 실제 빈자리가 안정화됐으면 기술적 끊김이 아니므로 즉시 후보를 버린다.
+        if vision.stable_presence is PresenceStatus.VACANT:
+            return False
+        now_mono = self._monotonic()
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if (snapshot.control_mode is not ControlMode.AUTO
+                    or snapshot.posture_candidate not in {
+                        PostureStatus.SITTING, PostureStatus.STANDING
+                    }
+                    or self._candidate_started_mono is None):
+                return False
+            if self._vision_uncertain_since_mono is None:
+                self._vision_uncertain_since_mono = now_mono
+            if (now_mono - self._vision_uncertain_since_mono
+                    > self._settings.vision_uncertainty_grace_seconds):
+                return False
+            merged_codes = self._with_stop_failure(self._vision_codes(vision))
+            if (snapshot.state is AutomationState.OBSERVING
+                    and snapshot.blocked_reason_codes == merged_codes
+                    and snapshot.last_transition_reason == "VISION_GRACE"):
+                return True
+            self._replace_locked(
+                state=AutomationState.OBSERVING,
+                blocked_reason_codes=merged_codes,
+                last_transition_reason="VISION_GRACE",
+            )
+            return True
+
+    async def _resume_candidate_after_vision_uncertainty(
+        self,
+        current: CurrentUserSnapshot,
+        pair: tuple[float, float],
+    ) -> bool:
+        """Pause candidate time over a short gap, or use this frame as a new baseline."""
+
+        now_mono = self._monotonic()
+        async with self._state_lock:
+            started = self._vision_uncertain_since_mono
+            if started is None:
+                return True
+            self._vision_uncertain_since_mono = None
+            if (self._snapshot.session_id != current.session_id
+                    or self._snapshot.control_mode is not ControlMode.AUTO):
+                return False
+            elapsed = max(0.0, now_mono - started)
+            if elapsed > self._settings.vision_uncertainty_grace_seconds:
+                self._reset_candidate_locked()
+                self._last_pair = pair
+                self._vision_recovery_baseline_required = False
+                self._replace_locked(
+                    state=AutomationState.OBSERVING,
+                    blocked_reason_codes=self._with_stop_failure(()),
+                    last_transition_reason="VISION_RECOVERED_AFTER_GRACE",
+                )
+                return False
+            if self._candidate_started_mono is not None:
+                self._candidate_started_mono += elapsed
+            due_at = self._snapshot.initial_move_due_at
+            self._replace_locked(
+                state=AutomationState.OBSERVING,
+                initial_move_due_at=(
+                    due_at + timedelta(seconds=elapsed) if due_at is not None else None
+                ),
+                blocked_reason_codes=self._with_stop_failure(()),
+                last_transition_reason="VISION_RECOVERED_WITHIN_GRACE",
+            )
+            return True
+
+    async def _block_auto(self, vision: VisionSnapshot) -> None:
+        codes = self._vision_codes(vision)
+        # 목표를 고른 뒤에는 얼굴, 재실, 자세, 카메라 연결이 물리 이동의
+        # 수명주기를 소유하지 않는다. 어떤 Vision 변화도 이미 시작한 이동을
+        # 중간 높이에서 끊지 않는다. 높이/relay 오류는 DeskController가 맡는다.
+        if self._live_automatic:
+            return
+        async with self._state_lock:
+            snapshot = self._snapshot
+            merged_codes = self._with_stop_failure(codes)
+            if (snapshot.control_mode is not ControlMode.AUTO
+                    or snapshot.state is AutomationState.OBSERVING
+                    and snapshot.blocked_reason_codes == merged_codes):
+                return
+            self._reset_candidate_locked()
+            self._vision_recovery_baseline_required = True
+            self._replace_locked(
+                state=(AutomationState.BLOCKED
+                       if "DESK_STOP_FAILED" in merged_codes
+                       else AutomationState.OBSERVING),
+                blocked_reason_codes=merged_codes,
+                last_transition_reason="VISION_UNCERTAIN",
+            )
+
+    async def _finish_automatic_if_idle(self, session_id: str | None) -> None:
+        """Finish AUTO/PARK only after a fresh measurement confirms its target."""
+        try:
+            desk = self._desk.get_snapshot()
+        except Exception:
+            return
+        if desk.state is DeskState.ERROR:
+            async with self._state_lock:
+                if not self._live_automatic:
+                    return
+                self._invalidate_locked("DESK_ERROR")
+                # 이동이 중단되면 Desk는 ERROR로 남지만, 그 원인이 릴레이 고장이
+                # 아니라 Vision 불확실 같은 상위 판단인 경우가 많다. 릴레이가
+                # 멀쩡히 STOP을 보고하고 있으면 다음 프레임에서 다시 목표를
+                # 세울 수 있어야 한다. 그러지 않으면 목표와 다른 높이로 멈춘 채
+                # 세션이 바뀔 때까지 방치된다.
+                codes: tuple[str, ...] = ()
+                if not self._desk_relay_recoverable(desk):
+                    codes = ("DESK_ERROR",)
+                self._replace_locked(
+                    state=(AutomationState.BLOCKED if codes
+                           else AutomationState.OBSERVING),
+                    blocked_reason_codes=self._with_stop_failure(codes),
+                )
+            return
+        if desk.state not in {DeskState.IDLE, DeskState.STOPPED}:
+            return
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if (snapshot.session_id != session_id or not self._live_automatic
+                    or snapshot.intent_source not in {IntentSource.AUTO, IntentSource.PARK}):
+                return
+            target = snapshot.target_height_cm
+            height = desk.height
+            target_reached = (
+                target is not None
+                and height.status is HeightStatus.ONLINE
+                and height.height_cm is not None
+                and abs(height.height_cm - target) <= self._target_tolerance_cm
+            )
+            if not target_reached:
+                # STOPPED is also used for fail-safe stops and bounded fine
+                # correction exhaustion. It is not evidence of completion.
+                self._live_automatic = False
+                self._auto_completed_target_cm = None
+                self._auto_rearm_started_mono = None
+                code = (
+                    "DESK_STOPPED_BEFORE_TARGET"
+                    if height.status is HeightStatus.ONLINE and height.height_cm is not None
+                    else "DESK_HEIGHT_UNAVAILABLE_AFTER_STOP"
+                )
+                self._replace_locked(
+                    state=AutomationState.OBSERVING,
+                    blocked_reason_codes=self._with_stop_failure((code,)),
+                )
+                return
+            self._live_automatic = False
+            if snapshot.intent_source is IntentSource.AUTO and snapshot.target_height_cm is not None:
+                self._mark_auto_target_complete_locked(snapshot.target_height_cm)
+            self._replace_locked(
+                state=AutomationState.READY,
+                blocked_reason_codes=self._with_stop_failure(()),
+            )
+
+    async def _observe_park(self, vision: VisionSnapshot) -> None:
+        # A failed explicit or safety STOP is a global fail-closed latch.  It
+        # must win before PARK completion reconciliation can publish READY or
+        # a fresh VACANT frame can begin another PARK timer.
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if "DESK_STOP_FAILED" in snapshot.blocked_reason_codes:
+                self._park_started_mono = None
+                self._park_pair = None
+                if snapshot.intent_source is IntentSource.PARK:
+                    self._invalidate_locked("DESK_STOP_FAILED")
+                if (self._snapshot.state is not AutomationState.BLOCKED
+                        or self._snapshot.height_policy is not None
+                        or self._snapshot.target_height_cm is not None
+                        or self._snapshot.intent_source is not None
+                        or self._snapshot.park_due_at is not None):
+                    self._replace_locked(
+                        state=AutomationState.BLOCKED,
+                        height_policy=None,
+                        target_height_cm=None,
+                        intent_source=None,
+                        park_due_at=None,
+                        blocked_reason_codes=self._stop_failure_codes(),
+                    )
+                return
+        # PARK has no session, but completion still needs the same live intent
+        # reconciliation as AUTO.  Otherwise a completed park remains marked
+        # live and later presence incorrectly emits an unnecessary STOP.
+        await self._finish_automatic_if_idle(None)
+        pair = self._pair(vision)
+        safe, desk_code = self._park_desk_safe()
+        if not self._park_eligible(vision, pair) or not safe or self._manual_desk_intent():
+            await self._cancel_park_if_needed()
+            # PARK is a session-less convenience action.  At startup its
+            # first vacant frame can precede relay readiness, which
+            # only means that PARK cannot begin yet—not that a user command
+            # or an in-progress desk movement must be safety-blocked.
+            if desk_code not in {"PARK_HEIGHT_UNAVAILABLE", "PARK_RELAY_UNAVAILABLE"} and desk_code is not None:
+                await self._mark_blocked(desk_code)
+            return
+        assert pair is not None
+        if not self._both_new(pair, self._startup_pair) or not self._both_new(pair, self._park_pair):
+            return
+        self._park_pair = pair
+        now_mono = self._monotonic()
+        reset_tilt = False
+        async with self._state_lock:
+            if self._snapshot.session_id is not None:
+                return
+            if self._park_started_mono is None:
+                self._park_started_mono = now_mono
+                self._replace_locked(state=AutomationState.PARK_WAITING, height_policy=HeightPolicy.PARK,
+                                     park_due_at=self._utc_now() + timedelta(
+                                         seconds=self._settings.park_delay_seconds
+                                     ),
+                                     blocked_reason_codes=self._with_stop_failure(()))
+                return
+            if now_mono - self._park_started_mono < self._settings.park_delay_seconds:
+                return
+            if self._snapshot.intent_source is IntentSource.PARK:
+                return
+            self._schedule_locked(75.0, IntentSource.PARK, None)
+            reset_tilt = self._snapshot.state is AutomationState.PARKING
+        if reset_tilt:
+            self._park_tilt_requested = True
+            self._apply_tilt_level(
+                self._park_tilt_level,
+                success_event="tilt_parked",
+                failure_event="tilt_park_failed",
+                success_message="빈자리 기본 틸팅 단계로 옮깁니다.",
+                failure_message="빈자리 기본 틸팅 단계로 옮기지 못했습니다.",
+            )
+
+    def _park_eligible(self, vision: VisionSnapshot, pair: tuple[float, float] | None) -> bool:
+        allowed = {"PRESENCE_NOT_SINGLE"}
+        return (pair is not None and vision.raw_presence is PresenceStatus.VACANT
+                and vision.stable_presence is PresenceStatus.VACANT
+                and vision.upper.count == 0 and vision.lower.count == 0
+                and {str(code) for code in vision.reason_codes}.issubset(allowed))
+
+    @staticmethod
+    def _desk_relay_recoverable(desk: DeskSnapshot) -> bool:
+        """중단된 이동을 다시 시도해도 되는 Desk 상태인지 본다.
+
+        릴레이가 정지 상태로 정상 보고 중이고 높이도 읽히면, ERROR는 상위
+        판단으로 이동이 끊긴 흔적일 뿐이라 재개할 수 있다. 반대로 STOP 발행
+        자체가 실패했거나 릴레이가 응답하지 않으면 그대로 막아야 한다.
+        """
+
+        relay = desk.relay
+        if relay.last_error is not None:
+            return False
+        if relay.event in {None, RelayEvent.OFFLINE, RelayEvent.REJECTED}:
+            return False
+        if relay.state is not RelayState.STOP:
+            return False
+        return desk.height.height_cm is not None
+
+    def _park_desk_safe(self) -> tuple[bool, str | None]:
+        """Keep PARK policy checks out of DeskController's motion admission.
+
+        Height freshness and cached-height WAKE belong to
+        ``DeskController.set_target()``.  Repeating those checks here used to
+        reject a sleeping display before the controller could issue WAKE.
+        PARK owns policy-level cancellation and live relay-failure detection,
+        but must not pre-empt the common target admission path.
+        """
+        try:
+            desk = self._desk.get_snapshot()
+        except Exception:
+            return False, "DESK_UNAVAILABLE"
+        if (desk.state is DeskState.MOVING and self._live_automatic
+                and self._snapshot.intent_source is IntentSource.PARK):
+            return True, None
+        # A WAKE needs a last measurement to choose a bounded direction.  This
+        # is not a freshness check: STALE and SENSOR_SLEEPING values continue
+        # to DeskController, while a true cold start simply waits for a basis.
+        if desk.height.height_cm is None or desk.height.observed_at is None:
+            return False, "PARK_HEIGHT_UNAVAILABLE"
+        relay = desk.relay
+        if (relay.last_error is not None or relay.event in {None, RelayEvent.OFFLINE, RelayEvent.REJECTED}
+                or relay.state is not RelayState.STOP):
+            return False, "PARK_RELAY_UNAVAILABLE"
+        if relay.event not in {RelayEvent.ONLINE, RelayEvent.HEARTBEAT, RelayEvent.STOPPED}:
+            return False, "PARK_RELAY_UNAVAILABLE"
+        return True, None
+
+    async def _cancel_park_if_needed(self) -> None:
+        async with self._state_lock:
+            self._park_started_mono = None
+            self._park_pair = None
+            stop_tilt = self._park_tilt_requested
+            self._park_tilt_requested = False
+            if self._snapshot.intent_source is not IntentSource.PARK:
+                live = False
+            else:
+                live = self._invalidate_locked("PARK_CANCELLED")
+                self._set_waiting_locked("PARK_CANCELLED")
+        if live:
+            await self._safe_stop("PARK 취소 안전 정지")
+        if stop_tilt:
+            await self._safe_tilt_stop("PARK 취소 틸팅 정지")
+
+    def _manual_desk_intent(self) -> bool:
+        try:
+            state = self._desk.get_snapshot().state
+            if (state is DeskState.MOVING and self._live_automatic
+                    and self._snapshot.intent_source is IntentSource.PARK):
+                return False
+            return state in {DeskState.MANUAL, DeskState.MOVING, DeskState.WAKING}
+        except Exception:
+            return True
+
+    def _schedule_locked(self, target: float, source: IntentSource, session_id: str | None) -> None:
+        if "DESK_STOP_FAILED" in self._snapshot.blocked_reason_codes:
+            self._replace_locked(state=AutomationState.BLOCKED)
+            return
+        generation = self._snapshot.generation
+        state = AutomationState.MOVING if source is IntentSource.AUTO else AutomationState.PARKING
+        if not self._settings.execute_automatic_movements:
+            self._replace_locked(target_height_cm=target, intent_source=source, state=AutomationState.BLOCKED,
+                                 height_policy=HeightPolicy.PARK if source is IntentSource.PARK else self._snapshot.height_policy,
+                                 initial_move_due_at=None,
+                                 blocked_reason_codes=("AUTOMATIC_EXECUTION_DISABLED",))
+            return
+        self._replace_locked(target_height_cm=target, intent_source=source, state=state,
+                             height_policy=HeightPolicy.PARK if source is IntentSource.PARK else self._snapshot.height_policy,
+                             initial_move_due_at=None,
+                             blocked_reason_codes=self._with_stop_failure(()))
+        if source is IntentSource.AUTO:
+            self._auto_completed_target_cm = None
+            self._auto_rearm_started_mono = None
+        self._live_automatic = True
+        self._dispatch_task = asyncio.create_task(
+            self._dispatch_target(target, source, generation, session_id), name="desk-automation-dispatch"
+        )
+
+    async def _dispatch_target(self, target: float, source: IntentSource,
+                               generation: int, session_id: str | None) -> None:
+        # vision/session invalidation과 desk side effect의 선형화 지점이다.
+        async with self._command_lock:
+            if not await self._dispatch_valid(generation, session_id, source):
+                return
+            try:
+                self._announce_height(target, automatic=source is IntentSource.AUTO)
+                await self._desk.set_target(target)
+                await self._finish_automatic_if_idle(session_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                async with self._state_lock:
+                    if generation == self._snapshot.generation:
+                        self._live_automatic = False
+                        self._replace_locked(
+                            state=AutomationState.OBSERVING,
+                            blocked_reason_codes=("DESK_COMMAND_REJECTED",),
+                        )
+
+    async def _dispatch_valid(self, generation: int, session_id: str | None, source: IntentSource) -> bool:
+        async with self._state_lock:
+            snapshot = self._snapshot
+            if (generation != snapshot.generation or snapshot.intent_source is not source
+                    or snapshot.session_id != session_id):
+                return False
+        if session_id is not None and not await self._users.is_current(session_id):
+            return False
+        # The current-user wait stays outside the state lock.  Recheck the
+        # generation/intent immediately before Desk I/O so an obsolete task
+        # cannot become authoritative after a command or session callback.
+        async with self._state_lock:
+            snapshot = self._snapshot
+            return (generation == snapshot.generation and snapshot.intent_source is source
+                    and snapshot.session_id == session_id)
+
+    def _target_for(self, snapshot: AutomationSnapshot, posture: PostureStatus) -> float | None:
+        if snapshot.activity_mode is not None:
+            return (snapshot.activity_mode.sitting_height_cm if posture is PostureStatus.SITTING
+                    else snapshot.activity_mode.standing_height_cm)
+        return 75.0 if posture is PostureStatus.SITTING else 110.0
+
+    def _desk_height(self) -> float | None:
+        try:
+            return self._desk.get_snapshot().height.height_cm
+        except Exception:
+            return None
+
+    def _pair(self, vision: VisionSnapshot) -> tuple[float, float] | None:
+        upper, lower = vision.upper.captured_monotonic, vision.lower.captured_monotonic
+        if upper is None or lower is None:
+            return None
+        return upper, lower
+
+    @staticmethod
+    def _both_new(pair: tuple[float, float], previous: tuple[float, float] | None) -> bool:
+        return previous is None or (pair[0] > previous[0] and pair[1] > previous[1])
+
+    async def _mark_blocked(self, code: str) -> None:
+        async with self._state_lock:
+            if self._snapshot.state is AutomationState.BLOCKED and self._snapshot.blocked_reason_codes == (code,):
+                return
+            live = self._invalidate_locked(code)
+            self._replace_locked(
+                state=AutomationState.BLOCKED,
+                blocked_reason_codes=self._with_stop_failure((code,)),
+            )
+        if live:
+            await self._safe_stop("자동화 관측 오류 안전 정지")
+
+    async def _record_observation_error(self) -> None:
+        """Expose a transient loop error without cancelling accepted Desk work."""
+
+        async with self._state_lock:
+            codes = tuple(dict.fromkeys(
+                (*self._snapshot.blocked_reason_codes, "AUTOMATION_OBSERVATION_ERROR")
+            ))
+            if self._live_automatic:
+                self._replace_locked(blocked_reason_codes=codes)
+                return
+            state = (
+                AutomationState.BLOCKED
+                if "DESK_STOP_FAILED" in codes
+                else AutomationState.MANUAL
+                if self._snapshot.control_mode is ControlMode.MANUAL
+                else AutomationState.OBSERVING
+                if self._snapshot.session_id is not None
+                else AutomationState.WAITING_USER
+            )
+            self._replace_locked(state=state, blocked_reason_codes=codes)
+
+    async def _clear_observation_error(self) -> None:
+        if "AUTOMATION_OBSERVATION_ERROR" not in self._snapshot.blocked_reason_codes:
+            return
+        async with self._state_lock:
+            if "AUTOMATION_OBSERVATION_ERROR" in self._snapshot.blocked_reason_codes:
+                self._replace_locked(blocked_reason_codes=tuple(
+                    code for code in self._snapshot.blocked_reason_codes
+                    if code != "AUTOMATION_OBSERVATION_ERROR"
+                ))
+
+    def _automatic_desk_in_progress(self) -> bool:
+        if not self._live_automatic or self._snapshot.intent_source is not IntentSource.AUTO:
+            return False
+        try:
+            return self._desk.get_snapshot().state in {DeskState.MOVING, DeskState.WAKING}
+        except Exception:
+            # A transient snapshot failure must not turn absence into STOP.
+            return True
+
+    async def _recover_stop_failure_if_confirmed(self) -> None:
+        """Clear a STOP failure latch after a newer live relay STOP arrives."""
+
+        snapshot = self._snapshot
+        if "DESK_STOP_FAILED" not in snapshot.blocked_reason_codes:
+            return
+        try:
+            relay = self._desk.get_snapshot().relay
+        except Exception:
+            return
+        if (
+            relay.last_error is not None
+            or relay.state is not RelayState.STOP
+            or relay.event not in {RelayEvent.ONLINE, RelayEvent.HEARTBEAT, RelayEvent.STOPPED}
+            or relay.received_at is None
+            or relay.received_at <= snapshot.last_transition_at
+        ):
+            return
+        async with self._state_lock:
+            if "DESK_STOP_FAILED" not in self._snapshot.blocked_reason_codes:
+                return
+            codes = self._without_stop_failure()
+            state = (
+                AutomationState.MANUAL
+                if self._snapshot.control_mode is ControlMode.MANUAL
+                else AutomationState.OBSERVING
+                if self._snapshot.session_id is not None
+                else AutomationState.WAITING_USER
+            )
+            self._replace_locked(
+                state=state,
+                blocked_reason_codes=codes,
+                last_transition_reason="DESK_STOP_RECOVERED",
+            )
+
+    async def _recover_desk_error_if_ready(self) -> None:
+        """Retry after an ESP32/MQTT interruption once relay and height recover."""
+
+        if "DESK_ERROR" not in self._snapshot.blocked_reason_codes:
+            return
+        try:
+            desk = self._desk.get_snapshot()
+        except Exception:
+            return
+        if not self._desk_relay_recoverable(desk):
+            return
+        async with self._state_lock:
+            if "DESK_ERROR" not in self._snapshot.blocked_reason_codes:
+                return
+            codes = tuple(
+                code for code in self._snapshot.blocked_reason_codes if code != "DESK_ERROR"
+            )
+            state = (
+                AutomationState.MANUAL
+                if self._snapshot.control_mode is ControlMode.MANUAL
+                else AutomationState.OBSERVING
+                if self._snapshot.session_id is not None
+                else AutomationState.WAITING_USER
+            )
+            self._replace_locked(
+                state=state,
+                blocked_reason_codes=codes,
+                last_transition_reason="DESK_RECOVERED",
+            )
+
+    def _invalidate_locked(self, reason: str) -> bool:
+        live = self._live_automatic
+        self._live_automatic = False
+        self._auto_completed_target_cm = None
+        self._auto_rearm_started_mono = None
+        self._vision_recovery_baseline_required = False
+        self._snapshot = replace(self._snapshot, generation=self._snapshot.generation + 1,
+                                 revision=self._snapshot.revision + 1,
+                                 last_transition_reason=reason,
+                                 last_transition_source="AUTOMATION", last_transition_at=self._utc_now(),
+                                 updated_at=self._utc_now())
+        task, self._dispatch_task = self._dispatch_task, None
+        if task is not None and not task.done():
+            task.cancel()
+        self._reset_candidate_locked()
+        return live
+
+    def _mark_auto_target_complete_locked(self, target: float) -> None:
+        self._auto_completed_target_cm = target
+        self._auto_rearm_started_mono = None
+
+    def _auto_rearm_pending_locked(
+        self,
+        target: float,
+        desk_height: float | None,
+        now_mono: float,
+    ) -> bool:
+        """Require a sustained, meaningful drift before AUTO repeats a target."""
+
+        if self._auto_completed_target_cm != target:
+            return False
+        if (desk_height is None
+                or abs(desk_height - target) < self._settings.auto_rearm_distance_cm):
+            self._auto_rearm_started_mono = None
+            return True
+        if self._auto_rearm_started_mono is None:
+            self._auto_rearm_started_mono = now_mono
+            return True
+        return now_mono - self._auto_rearm_started_mono < self._settings.auto_rearm_seconds
+
+    def _reset_candidate_locked(self) -> None:
+        self._vision_uncertain_since_mono = None
+        self._candidate_started_mono = None
+        self._candidate_pair = None
+        self._last_pair = None
+        self._snapshot = replace(self._snapshot, posture_candidate=None,
+                                 candidate_since=None, initial_move_due_at=None)
+
+    def _set_waiting_locked(self, reason: str) -> None:
+        blocked = self._with_stop_failure(())
+        self._replace_locked(session_id=None, control_mode=None, activity_mode=None,
+                             state=AutomationState.BLOCKED if blocked else AutomationState.WAITING_USER,
+                             height_policy=None,
+                             posture_candidate=None, candidate_since=None, target_height_cm=None,
+                             intent_source=None, blocked_reason_codes=blocked, initial_move_due_at=None,
+                             park_due_at=None, last_transition_reason=reason)
+
+    def _replace_locked(self, **changes: object) -> None:
+        now = self._utc_now()
+        changes.setdefault("revision", self._snapshot.revision + 1)
+        changes.setdefault("updated_at", now)
+        changes.setdefault("last_transition_at", now)
+        changes.setdefault("last_transition_source", "AUTOMATION")
+        self._snapshot = replace(self._snapshot, **changes)
+
+    async def _begin_usage(self, profile_id: str | None, mode: EffectiveActivityMode | None) -> None:
+        """모드가 실제로 걸린 순간부터 사용 시간을 세기 시작한다."""
+
+        if self._usage is None or profile_id is None or mode is None:
+            return
+        try:
+            await self._usage.start_interval(profile_id, mode.key, mode.name)
+        except Exception:
+            LOGGER.exception(
+                "작업 모드 사용 기록을 시작하지 못했습니다.",
+                extra={"component": "automation", "event": "usage_start_failed"},
+            )
+
+    async def _end_usage(self, profile_id: str | None) -> None:
+        """자리를 비우면 구간을 닫아 그동안 시간이 늘지 않게 한다."""
+
+        if self._usage is None:
+            return
+        try:
+            await self._usage.close_open_intervals(profile_id)
+        except Exception:
+            LOGGER.exception(
+                "작업 모드 사용 기록을 닫지 못했습니다.",
+                extra={"component": "automation", "event": "usage_close_failed"},
+            )
+
+    def _remember_mode(self, profile_id: str | None, mode_key: str | None) -> None:
+        if profile_id is None or mode_key is None:
+            return
+        self._remembered_mode[profile_id] = (mode_key, self._monotonic())
+
+    def _recall_mode(self, profile_id: str | None) -> str | None:
+        """기억 시간이 지나지 않았으면 마지막으로 쓰던 모드 key를 돌려준다."""
+
+        if profile_id is None:
+            return None
+        remembered = self._remembered_mode.get(profile_id)
+        if remembered is None:
+            return None
+        mode_key, stored_at = remembered
+        if self._monotonic() - stored_at > self._mode_memory_seconds:
+            self._remembered_mode.pop(profile_id, None)
+            return None
+        return mode_key
+
+    def _apply_mode_tilt(self, mode: EffectiveActivityMode | None) -> None:
+        """모드가 정해 둔 기본 틸팅 단계로 옮긴다. 부르는 자리를 붙잡지 않는다.
+
+        단계를 정하지 않은 모드(None)는 지금 각도를 그대로 둔다는 뜻이다.
+        틸팅은 있으면 좋은 것이지 session 설치를 막을 일이 아니므로, 실패해도
+        기록만 남기고 넘어간다.
+        """
+
+        tilt = self._tilt
+        if tilt is None or mode is None or mode.tilt_level is None:
+            return
+        self._apply_tilt_level(
+            mode.tilt_level,
+            success_event="tilt_installed",
+            failure_event="tilt_install_failed",
+            success_message="기본 틸팅 단계로 옮깁니다.",
+            failure_message="기본 틸팅 단계로 옮기지 못했습니다.",
+        )
+
+    def _apply_tilt_level(
+        self,
+        level: int,
+        *,
+        success_event: str,
+        failure_event: str,
+        success_message: str,
+        failure_message: str,
+    ) -> None:
+        """한 틸트 요청을 직전 요청 뒤에 best-effort로 실행한다."""
+
+        tilt = self._tilt
+        if tilt is None:
+            return
+        previous = self._tilt_task
+
+        async def apply() -> None:
+            if previous is not None:
+                await asyncio.gather(previous, return_exceptions=True)
+            try:
+                await tilt.set_target(level)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                LOGGER.info(
+                    failure_message,
+                    extra={"component": "automation", "event": failure_event,
+                           "error": str(error)},
+                )
+                return
+            LOGGER.info(
+                success_message,
+                extra={"component": "automation", "event": success_event,
+                       "tilt_level": level},
+            )
+
+        self._tilt_task = asyncio.create_task(apply(), name="desk-automation-tilt")
+
+    async def _safe_tilt_stop(self, reason: str) -> None:
+        """PARK 소유의 틸트 이동을 취소하되 다른 자동화 상태는 되돌리지 않는다."""
+
+        if self._tilt is None:
+            return
+        task, self._tilt_task = self._tilt_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        try:
+            await self._tilt.stop_motion(reason)
+        except Exception as error:
+            LOGGER.info(
+                "빈자리 틸팅 이동을 정지하지 못했습니다.",
+                extra={
+                    "component": "automation",
+                    "event": "tilt_park_stop_failed",
+                    "error": str(error),
+                },
+            )
+
+    def _install_mode_lighting(self, mode: EffectiveActivityMode | None) -> LedSetting:
+        """모드가 걸릴 때 조명 계획을 세우고 지금 적용할 값을 돌려준다."""
+
+        self._mode_started_mono = self._monotonic()
+        self._schedule_applied = None
+        self._active_schedule = None
+        if mode is None:
+            return (None, None)
+        if mode.led_schedule is not None:
+            try:
+                self._active_schedule = parse_schedule(mode.led_schedule)
+            except Exception:
+                LOGGER.warning(
+                    "조명 스케줄을 읽지 못해 저장된 색을 그대로 씁니다.",
+                    extra={"component": "automation", "event": "led_schedule_unreadable"},
+                )
+        resolved = self._resolve_schedule()
+        if resolved is not None:
+            self._schedule_applied = resolved
+            return resolved
+        return (mode.led_color, mode.led_brightness)
+
+    def _resolve_schedule(self) -> tuple[str, int] | None:
+        """지금 스케줄이 가리키는 (색, 밝기). 스케줄이 없으면 None."""
+
+        schedule = self._active_schedule
+        if schedule is None:
+            return None
+        started = self._mode_started_mono
+        elapsed = None if started is None else (self._monotonic() - started) / 60.0
+        return schedule.resolve(now=self._local_now().time(), elapsed_minutes=elapsed)
+
+    def _local_now(self) -> datetime:
+        """시각 스케줄이 쓸 현지 시각. 컨테이너가 UTC로 돌아도 어긋나지 않는다."""
+
+        try:
+            return self._utc_now().astimezone(ZoneInfo(self._settings.schedule_timezone))
+        except Exception:
+            return self._utc_now()
+
+    def _tick_led_schedule(self) -> None:
+        """구간이 넘어갔으면 조명을 다시 보낸다. 매 관찰마다 값싸게 확인한다."""
+
+        if self._active_schedule is None or self._wled is None:
+            return
+        resolved = self._resolve_schedule()
+        if resolved is None or resolved == self._schedule_applied:
+            return
+        self._schedule_applied = resolved
+        colour, brightness = resolved
+        self._queue_led(colour, brightness)
+
+    def _announce_height(self, target: float, *, automatic: bool) -> None:
+        """책상이 어디로 가는지 알린다. 실제로 움직일 때만 부른다."""
+
+        if self._announcer is None:
+            return
+        here = self._desk_height()
+        # 이미 그 높이면 움직이지 않으므로 말하지 않는다.
+        if here is not None and abs(here - target) <= self._target_tolerance_cm:
+            return
+        # 같은 목표를 연달아 반복하지 않는다.
+        if (self._announced_target_cm is not None
+                and abs(self._announced_target_cm - target) <= self._target_tolerance_cm):
+            return
+        self._announced_target_cm = target
+        # 지금 높이를 모르면 어느 쪽인지 단정하지 않는다.
+        direction = "옮길게요" if here is None else "올릴게요" if target > here else "내릴게요"
+        lead = "자세에 맞춰 " if automatic else ""
+        self._announcer.say_soon(f"{lead}책상을 {target:.0f}센티미터로 {direction}.")
+
+    def _queue_led(self, color: str | None, brightness: int | None = None) -> None:
+        self._queue_led_values(((color, brightness),))
+
+    def _queue_led_sequence(self, color: str | None, brightness: int | None = None) -> None:
+        values: tuple[LedSetting, ...] = (
+            ((None, None),) if color is None else ((None, None), (color, brightness))
+        )
+        self._queue_led_values(values)
+
+    def _queue_led_values(self, values: tuple[LedSetting, ...]) -> None:
+        """Coalesce LED ownership; an older session cannot paint over a newer one."""
+        if self._wled is None:
+            return
+        self._wled_sequence += 1
+        sequence = self._wled_sequence
+        previous = self._wled_task
+
+        async def apply() -> None:
+            if previous is not None:
+                await asyncio.gather(previous, return_exceptions=True)
+            for color, brightness in values:
+                if sequence != self._wled_sequence:
+                    return
+                await self._apply_led(color, brightness, sequence)
+
+        self._wled_task = asyncio.create_task(apply(), name="desk-automation-wled")
+
+    async def _apply_led(self, color: str | None, brightness: int | None, sequence: int) -> None:
+        try:
+            async with self._wled_io_lock:
+                if sequence != self._wled_sequence or self._wled is None:
+                    return
+                if color is None:
+                    await self._wled.turn_off()
+                else:
+                    # 밝기를 먼저 맞춘 뒤 색을 올린다. 색이 나타나는 순간
+                    # 이미 그 모드의 밝기여서 직전 밝기가 스치지 않는다.
+                    if brightness is not None:
+                        await self._wled.set_brightness(brightness)
+                    await self._wled.set_solid(color)
+        except Exception:
+            async with self._state_lock:
+                codes = tuple(dict.fromkeys((*self._snapshot.blocked_reason_codes, "WLED_UNAVAILABLE")))
+                self._replace_locked(blocked_reason_codes=codes)
+        else:
+            async with self._state_lock:
+                if "WLED_UNAVAILABLE" in self._snapshot.blocked_reason_codes:
+                    self._replace_locked(blocked_reason_codes=tuple(
+                        code for code in self._snapshot.blocked_reason_codes if code != "WLED_UNAVAILABLE"
+                    ))
+
+    async def _safe_stop(self, reason: str) -> bool:
+        try:
+            await self._desk.stop_motion(reason)
+        except Exception:
+            # Safety STOP is best-effort in background work, but hiding a
+            # failure would falsely report an unblocked automation state.  A
+            # newer command/session may own the selection now, but cannot make
+            # the physical STOP failure safe, so retain that selection while
+            # globally latching automation as BLOCKED.
+            async with self._state_lock:
+                self._replace_locked(
+                    state=AutomationState.BLOCKED,
+                    blocked_reason_codes=self._stop_failure_codes(),
+                )
+            return False
+        return True
+
+    async def _stop_or_block(self, reason: str) -> None:
+        """Propagate a command STOP failure after recording the fail-closed state."""
+        try:
+            await self._desk.stop_motion(reason)
+        except Exception:
+            await self._mark_stop_failed()
+            raise
+
+    async def _mark_stop_failed(self) -> None:
+        async with self._state_lock:
+            self._replace_locked(
+                state=AutomationState.BLOCKED,
+                blocked_reason_codes=self._stop_failure_codes(),
+            )
+
+    def _raise_if_stop_failed(self) -> None:
+        if "DESK_STOP_FAILED" in self._snapshot.blocked_reason_codes:
+            raise RuntimeError("DESK_STOP_FAILED: 사용자 STOP 성공 후 다시 시도하세요.")
+
+    def _with_stop_failure(self, codes: tuple[str, ...]) -> tuple[str, ...]:
+        """Keep the safety latch while unrelated reasons are refreshed."""
+        values = (*codes,)
+        if "DESK_STOP_FAILED" in self._snapshot.blocked_reason_codes:
+            values = (*values, "DESK_STOP_FAILED")
+        return tuple(dict.fromkeys(values))
+
+    def _stop_failure_codes(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys((*self._snapshot.blocked_reason_codes, "DESK_STOP_FAILED"))
+        )
+
+    def _without_stop_failure(self) -> tuple[str, ...]:
+        return tuple(
+            code for code in self._snapshot.blocked_reason_codes
+            if code != "DESK_STOP_FAILED"
+        )
+
+    @staticmethod
+    def _vision_codes(vision: VisionSnapshot) -> tuple[str, ...]:
+        return tuple(str(code) for code in vision.reason_codes) or ("VISION_UNUSABLE",)
