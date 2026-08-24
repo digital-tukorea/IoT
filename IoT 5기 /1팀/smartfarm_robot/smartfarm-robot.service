@@ -1,0 +1,25 @@
+[Unit]
+Description=Smart Farm Robot Controller
+# 네트워크가 준비된 후에 시작 (MQTT 접속 실패 방지)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# ★ 아래 경로를 실제 프로젝트 위치로 수정하세요
+WorkingDirectory=/home/pi/smartfarm_robot
+ExecStart=/usr/bin/python3 /home/pi/smartfarm_robot/main_controller.py
+
+# 프로그램이 죽어도 5초 후 자동 재시작 (야외 무인 운용 안정성)
+Restart=on-failure
+RestartSec=5
+
+# 실행 계정 (라즈베리파이 기본 계정명에 맞게 수정)
+User=pi
+
+# 표준 출력/에러를 시스템 로그로 보내서 나중에 journalctl로 확인 가능
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
