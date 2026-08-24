@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- HangFit Mint Light Palette -->
+    <color name="primary">#1FAE96</color>
+    <color name="onPrimary">#FFFFFF</color>
+    <color name="primaryContainer">#D7F5EE</color>
+    <color name="onPrimaryContainer">#00382E</color>
+    <color name="secondary">#4C6560</color>
+    <color name="onSecondary">#FFFFFF</color>
+    <color name="secondaryContainer">#CEE9E2</color>
+    <color name="onSecondaryContainer">#082019</color>
+    <color name="tertiary">#3E6373</color>
+    <color name="onTertiary">#FFFFFF</color>
+    <color name="tertiaryContainer">#C2E8FB</color>
+    <color name="onTertiaryContainer">#001F29</color>
+    <color name="error">#BA1A1A</color>
+    <color name="onError">#FFFFFF</color>
+    <color name="errorContainer">#FFDAD6</color>
+    <color name="onErrorContainer">#410002</color>
+    <color name="background">#F5FBF9</color>
+    <color name="onBackground">#171D1B</color>
+    <color name="surface">#F5FBF9</color>
+    <color name="onSurface">#171D1B</color>
+    <color name="surfaceVariant">#DAE5E1</color>
+    <color name="onSurfaceVariant">#3F4946</color>
+    <color name="outline">#6F7976</color>
+    <color name="outlineVariant">#BEC9C5</color>
+    <color name="surfaceContainerHigh">#E4F0EC</color>
+    <color name="surfaceContainerLow">#EFF6F3</color>
+    <color name="surfaceContainer">#E9F2EE</color>
+
+    <!-- Fixed accent for chips / badges -->
+    <color name="mint_accent">#1FAE96</color>
+    <color name="mint_soft">#E4F7F2</color>
+    <color name="ink">#173A34</color>
+    <color name="ink_soft">#5B7A73</color>
+
+    <!-- Scrim colors used over background photos so text stays legible -->
+    <color name="scrim_top">#33000000</color>
+    <color name="scrim_bottom">#B3082018</color>
+    <color name="glass_card">#E6FFFFFF</color>
+
+    <!-- Referenced by legacy splash layout ids kept for compatibility -->
+    <color name="bg_dark">#F5FBF9</color>
+    <color name="point_mint">#1FAE96</color>
+    <color name="text_light">#173A34</color>
+</resources>

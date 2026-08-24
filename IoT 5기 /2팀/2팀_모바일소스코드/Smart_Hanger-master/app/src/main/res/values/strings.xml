@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">HangFit</string>
+
+    <string name="nav_weather">날씨</string>
+    <string name="nav_calendar">캘린더</string>
+    <string name="nav_closet">옷장</string>
+    <string name="nav_recommend">추천</string>
+</resources>

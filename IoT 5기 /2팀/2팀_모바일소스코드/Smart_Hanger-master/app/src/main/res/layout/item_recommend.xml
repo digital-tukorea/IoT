@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="16dp"
+    android:layout_marginVertical="8dp"
+    app:cardCornerRadius="24dp"
+    app:cardElevation="3dp"
+    app:cardBackgroundColor="@android:color/white">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                app:cardCornerRadius="18dp"
+                app:cardElevation="0dp">
+                <ImageView
+                    android:id="@+id/ivRecommendImage"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@color/mint_soft"
+                    android:scaleType="centerCrop" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvRecommendName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Clothing Name"
+                    android:textAppearance="?attr/textAppearanceTitleLarge"
+                    android:textColor="@color/ink" />
+
+                <TextView
+                    android:id="@+id/tvRecommendCategory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Category"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="@color/mint_accent" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSelect"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center_vertical"
+                app:backgroundTint="@color/mint_accent"
+                app:icon="@android:drawable/ic_menu_send"
+                app:iconTint="@android:color/white" />
+
+        </LinearLayout>
+
+        <!--
+            tvRecommendReason has no maxLines/ellipsize so the full AI-generated
+            description is always shown in full, however long it is.
+        -->
+        <TextView
+            android:id="@+id/tvRecommendReason"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_soft_note"
+            android:padding="12dp"
+            android:text="Reasoning for this choice..."
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="@color/ink"
+            android:lineSpacingExtra="3dp" />
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>
