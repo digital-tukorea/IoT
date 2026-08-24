@@ -1,0 +1,1539 @@
+from __future__ import annotations
+
+import json
+import logging
+import mimetypes
+import os
+import sqlite3
+import threading
+import time
+from pathlib import Path
+from typing import Any, Iterable
+
+import numpy as np
+
+import cv2
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
+
+try:
+    from paho.mqtt import client as mqtt
+except Exception:
+    mqtt = None
+
+try:
+    from ultralytics import YOLO
+except Exception:
+    YOLO = None
+
+try:
+    from google import genai
+    from google.genai import types
+except Exception:
+    genai = None
+    types = None
+
+
+BASE_DIR = Path(__file__).resolve().parent
+IMAGE_DIR = BASE_DIR / "saved_images"
+DATABASE_PATH = BASE_DIR / "local_gallery.db"
+STREAM_FRAME_DELAY_SECONDS = 1 / 25
+SNAPSHOT_COOLDOWN_SECONDS = 3.0
+VALID_QR_IDS = set(range(1, 11))
+
+
+def parse_int(value: str, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return default
+
+
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "127.0.0.1").strip()
+MQTT_BROKER_PORT = parse_int(os.getenv("MQTT_BROKER_PORT", "1883"), 1883)
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "rail/target_qr").strip()
+
+CAMERA_DEVICE = os.getenv("CAMERA_DEVICE", "/dev/video0").strip()
+CAMERA_INDEX = parse_int(os.getenv("CAMERA_INDEX", "0"), 0)
+MAX_CAMERA_INDEX = parse_int(os.getenv("MAX_CAMERA_INDEX", "5"), 5)
+
+DIGIT_YOLO_MODEL_PATH = os.getenv("DIGIT_YOLO_MODEL", "").strip()
+
+def open_camera_source(source: int | str) -> cv2.VideoCapture:
+    return cv2.VideoCapture(str(source))
+
+
+def find_available_camera_source() -> str | int:
+    seen = set()
+    candidates: list[str | int] = []
+    if CAMERA_DEVICE:
+        candidates.append(CAMERA_DEVICE)
+    candidates.extend([CAMERA_INDEX] + list(range(MAX_CAMERA_INDEX + 1)))
+
+    for source in candidates:
+        if source in seen:
+            continue
+        seen.add(source)
+        capture = None
+        try:
+            capture = open_camera_source(source)
+            if capture.isOpened():
+                capture.release()
+                return source
+        except Exception:
+            pass
+        finally:
+            if capture is not None:
+                capture.release()
+
+    return CAMERA_DEVICE if CAMERA_DEVICE else CAMERA_INDEX
+
+
+IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+api_key = os.getenv("GEMINI_API_KEY", "").strip()
+if api_key:
+    os.environ.setdefault("GOOGLE_API_KEY", api_key)
+
+try:
+    gemini_client = None
+except Exception:
+    gemini_client = None
+
+app = FastAPI(title="Smart Closet Backend")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("smart_closet_backend")
+
+frame_lock = threading.Lock()
+latest_frame: Any = None
+last_snapshot_time = 0.0
+camera_thread_started = False
+camera_lock = threading.Lock()
+brightness_lock = threading.Lock()
+stream_brightness = 0
+camera_unavailable_reported = False
+mqtt_client: Any = None
+mqtt_client_lock = threading.Lock()
+
+try:
+    yolo_model = YOLO("yolov8n.pt") if YOLO is not None else None
+except Exception:
+    yolo_model = None
+try:
+    digit_yolo_model = YOLO(DIGIT_YOLO_MODEL_PATH) if YOLO is not None and DIGIT_YOLO_MODEL_PATH else None
+except Exception as exc:
+    logger.warning("Failed to load digit YOLO model %s: %s", DIGIT_YOLO_MODEL_PATH, exc)
+    digit_yolo_model = None
+
+
+
+try:
+    qr_detector = cv2.QRCodeDetector()
+except Exception:
+    qr_detector = None
+
+
+def initialize_database() -> None:
+    try:
+        with sqlite3.connect(DATABASE_PATH) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS images (
+                    id INTEGER PRIMARY KEY,
+                    filepath TEXT,
+                    description TEXT,
+                    created_at REAL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at REAL,
+                    weather TEXT,
+                    aqi INTEGER,
+                    latitude REAL,
+                    longitude REAL,
+                    schedule TEXT
+                )
+                """
+            )
+            connection.commit()
+    except Exception:
+        pass
+
+
+def create_placeholder_frame(message: str = "Camera unavailable") -> np.ndarray:
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame[:, :] = (18, 24, 32)
+    cv2.putText(
+        frame,
+        message,
+        (40, 240),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    return frame
+
+
+initialize_database()
+
+
+def get_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+class ContextPayload(BaseModel):
+    weather: str
+    aqi: int
+    latitude: float
+    longitude: float
+    schedule: Any
+
+
+def save_context_record(context_data: dict[str, Any]) -> None:
+    timestamp = time.time()
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                "INSERT INTO app_context (created_at, weather, aqi, latitude, longitude, schedule) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    timestamp,
+                    str(context_data.get("weather", "")),
+                    parse_int(str(context_data.get("aqi", "0")), 0),
+                    float(context_data.get("latitude", 0.0)),
+                    float(context_data.get("longitude", 0.0)),
+                    json.dumps(context_data.get("schedule", []), ensure_ascii=False),
+                ),
+            )
+            connection.commit()
+    except Exception:
+        pass
+
+
+def fetch_latest_context() -> dict[str, Any] | None:
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT weather, aqi, latitude, longitude, schedule, created_at FROM app_context ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+
+        schedule_value = row["schedule"]
+        try:
+            schedule = json.loads(schedule_value) if schedule_value else []
+        except Exception:
+            schedule = schedule_value
+
+        return {
+            "weather": row["weather"],
+            "aqi": row["aqi"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "schedule": schedule,
+            "created_at": row["created_at"],
+        }
+    except Exception:
+        return None
+
+
+def initialize_mqtt() -> None:
+    global mqtt_client
+    if mqtt is None or mqtt_client is not None:
+        return
+
+    try:
+        mqtt_client = mqtt.Client(client_id="smart_closet_backend", clean_session=True)
+        mqtt_client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 10)
+        mqtt_client.loop_start()
+    except Exception:
+        mqtt_client = None
+
+
+def publish_slot_id(image_id: int) -> bool:
+    global mqtt_client
+    if mqtt is None:
+        return False
+
+    if mqtt_client is None:
+        initialize_mqtt()
+
+    if mqtt_client is None:
+        return False
+
+    try:
+        payload = json.dumps(
+            {
+                "slot_id": image_id,
+                "device_id": "smart_closet_backend",
+                "ts": int(time.time()),
+            },
+            ensure_ascii=False,
+        )
+        result = mqtt_client.publish(MQTT_TOPIC, payload, qos=1, retain=False)
+        return getattr(result, "rc", None) == mqtt.MQTT_ERR_SUCCESS
+    except Exception:
+        return False
+
+
+def get_weather_info() -> dict[str, Any]:
+    return {
+        "temperature_c": 10,
+        "conditions": "Windy and Chilly",
+    }
+
+
+def get_gemini_client() -> Any | None:
+    if genai is None:
+        return None
+
+    api_key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+    google_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+
+    try:
+        if api_key:
+            logger.info("Initializing Gemini client with API key")
+            return genai.Client(api_key=api_key)
+
+        if google_creds:
+            logger.info("Initializing Gemini client with GOOGLE_APPLICATION_CREDENTIALS=%s", google_creds)
+            return genai.Client()
+
+        logger.warning("No Gemini API key or Google credentials available")
+        return None
+    except Exception as exc:
+        logger.warning("Failed to initialize Gemini client: %s", exc)
+        return None
+
+
+def build_llm_recommendation(inventory: list[dict[str, Any]], weather_info: dict[str, Any]) -> dict[str, Any]:
+    if genai is None or types is None:
+        return {
+            "summary": "오늘은 가볍고 편한 스타일을 추천해요.",
+            "recommendations": [
+                {"id": item.get("id"), "reason": "데이터 기반 기본 추천"}
+                for item in inventory[:3]
+            ],
+            "weather_note": f"현재 기온 {weather_info.get('temperature_c')}°C, {weather_info.get('conditions')}",
+        }
+
+    prompt = (
+        "당신은 스마트 옷장 스타일리스트입니다. 현재 날씨 정보와 옷장에 있는 항목들을 분석해 오늘 사용자에게 가장 잘 어울리는 상위 3개 항목을 선택하세요. "
+        "선택된 각 항목에 대해 왜 적합한지 짧은 문장으로 설명하세요. 불필요한 마크다운이나 추가 설명은 포함하지 마세요. "
+        "반환 값은 반드시 다음 JSON 형식으로만 작성하세요: {\"summary\": 문자열, \"recommendations\": [{\"id\": 숫자, \"reason\": 문자열}], \"weather_note\": 문자열}.\n"
+        f"Weather: {json.dumps(weather_info, ensure_ascii=False)}\n"
+        f"Inventory: {json.dumps(inventory, ensure_ascii=False)}"
+    )
+
+    model_candidates = ["gemini-2.5-flash", "gemini-2.0-flash-001"]
+    for model_name in model_candidates:
+        try:
+            client = get_gemini_client()
+            if client is None:
+                raise RuntimeError("Gemini client unavailable")
+
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            raw_text = getattr(response, "text", "") or ""
+            cleaned = raw_text.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.strip("`")
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+
+    return {
+        "summary": "오늘은 가볍고 편한 스타일을 추천해요.",
+        "recommendations": [
+            {"id": item.get("id"), "reason": "기본 추천"}
+            for item in inventory[:3]
+        ],
+        "weather_note": f"현재 기온 {weather_info.get('temperature_c')}°C, {weather_info.get('conditions')}",
+    }
+
+
+def resolve_class_name(model: Any, class_id: int) -> str:
+    try:
+        names = getattr(model, "names", {})
+        if isinstance(names, dict):
+            return str(names.get(class_id, "")).lower()
+        if isinstance(names, list) and class_id < len(names):
+            return str(names[class_id]).lower()
+    except Exception:
+        pass
+    return ""
+
+
+def is_clothing_like(class_name: str) -> bool:
+    return class_name in {"person", "clothing", "backpack", "tie", "suitcase"}
+
+
+def is_qr_anchor(class_name: str) -> bool:
+    return class_name in {"qrcode", "backpack"}
+
+
+def decode_qr_from_roi(roi: Any) -> str:
+    if qr_detector is None or roi is None or roi.size == 0:
+        return ""
+
+    try:
+        decoded_text, _, _ = qr_detector.detectAndDecode(roi)
+        if decoded_text:
+            return decoded_text.strip()
+    except Exception:
+        return ""
+
+    return ""
+
+
+def parse_valid_qr_id(raw_value: str) -> int | None:
+    try:
+        value = int(str(raw_value).strip())
+        if value in VALID_QR_IDS:
+            return value
+    except Exception:
+        return None
+    return None
+
+
+def detect_clothing_simple(frame: Any) -> list[tuple[int, int, int, int]]:
+    """Simple clothing detection using edge detection (no YOLO needed)"""
+    boxes = []
+    if frame is None:
+        return boxes
+    
+    try:
+        height, width = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 1500:  # Skip small noise
+                continue
+            
+            x, y, w, h = cv2.boundingRect(contour)
+            # Clothing-like dimensions
+            if w > 40 and h > 50 and 0.3 < w/max(h,1) < 3.0:
+                x1, y1, x2, y2 = x, y, x + w, y + h
+                if (x2 - x1) > 30 and (y2 - y1) > 40:
+                    boxes.append((x1, y1, x2, y2))
+    except Exception:
+        pass
+    
+    return boxes
+
+
+def draw_clothing_overlay(frame: Any, boxes: list[tuple[int, int, int, int]]) -> Any:
+    """Draw blue borders around clothing (파란색 테두리)"""
+    if frame is None or not boxes:
+        return frame
+    
+    overlay = frame.copy()
+    for (x1, y1, x2, y2) in boxes:
+        # Blue border (BGR format: (255, 0, 0) = blue)
+        cv2.rectangle(overlay, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 3)
+        cv2.putText(overlay, "CLOTHING", (int(x1), max(15, int(y1) - 10)),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2, cv2.LINE_AA)
+    return overlay
+
+
+def draw_detection_overlay(
+    frame: Any,
+    clothing_boxes: list[tuple[int, int, int, int]],
+    digit_boxes: list[tuple[int, int, int, int]],
+    clothing_labels: list[str] | None = None,
+    digit_labels: list[str] | None = None,
+) -> Any:
+    """Annotate clothing and 1-10 slot detections in a camera frame."""
+    if frame is None:
+        return frame
+
+    overlay = frame.copy()
+    for index, (x1, y1, x2, y2) in enumerate(clothing_boxes):
+        label = (clothing_labels or ["CLOTHING"] * len(clothing_boxes))[index]
+        cv2.rectangle(overlay, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 3)
+        cv2.putText(overlay, label, (int(x1), max(18, int(y1) - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 0, 0), 2, cv2.LINE_AA)
+    for index, (x, y, width, height) in enumerate(digit_boxes):
+        label = (digit_labels or ["SLOT"] * len(digit_boxes))[index]
+        cv2.rectangle(overlay, (int(x), int(y)), (int(x + width), int(y + height)), (0, 180, 0), 3)
+        cv2.putText(overlay, label, (int(x), max(18, int(y) - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 180, 0), 2, cv2.LINE_AA)
+    return overlay
+
+
+def remove_existing_file(file_path: str) -> None:
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+
+def save_frame_to_disk(frame: Any, image_path: Path) -> None:
+    try:
+        success = cv2.imwrite(str(image_path), frame)
+        if not success:
+            raise RuntimeError("Failed to write frame to disk")
+    except Exception:
+        raise
+
+
+def get_image_color_name(image_path: Path) -> str:
+    try:
+        frame = cv2.imread(str(image_path))
+        if frame is None:
+            return "neutral"
+
+        average_bgr = frame.mean(axis=(0, 1))
+        blue, green, red = [float(c) for c in average_bgr]
+        if red >= green and red >= blue:
+            if red - max(green, blue) > 50:
+                return "red"
+            return "warm"
+        if green >= red and green >= blue:
+            if green - max(red, blue) > 50:
+                return "green"
+            return "olive"
+        if blue >= red and blue >= green:
+            if blue - max(red, green) > 50:
+                return "blue"
+            return "cool"
+        return "neutral"
+    except Exception:
+        return "neutral"
+
+
+def local_image_summary(image_path: Path) -> str:
+    core_color = get_image_color_name(image_path)
+    labels = analyze_image_labels(image_path)
+    label_text = ", ".join(labels[:2]) if labels else "옷"
+    if core_color in {"red", "blue", "green"}:
+        return f"{core_color} 톤의 {label_text}으로 보여요. 편안하게 입기 좋습니다."
+    if core_color in {"warm", "cool", "olive"}:
+        return f"은은한 {core_color} 컬러의 {label_text}으로 일상에 잘 어울립니다."
+    return f"기본적인 {label_text}으로 보이며, 스타일링하기 좋습니다."
+
+
+def analyze_image_with_gemini(image_path: Path) -> str:
+    prompt = (
+        "당신은 이미지 기반 패션 어시스턴트입니다. 이 옷 사진을 보고 한 문장으로 간결하게 설명하세요. "
+        "옷 종류, 대표 색상, 예상 소재감, 추천 착용 상황을 포함하고, 캐주얼/스포티/포멀 느낌이 명확하면 언급하세요. "
+        "응답은 반드시 한국어로 자연스럽게 작성하고, 여분의 해설이나 코드 블록 없이 한 문장으로만 작성하세요."
+    )
+
+    if genai is None or types is None:
+        return local_image_summary(image_path)
+
+    try:
+        client = get_gemini_client()
+        if client is None:
+            raise RuntimeError("Gemini client unavailable")
+
+        image_bytes = image_path.read_bytes()
+        image_mime_type = mimetypes.guess_type(str(image_path))[0] or "image/jpeg"
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type)
+
+        model_candidates = ["gemini-2.5-flash", "gemini-2.0-flash-001", "gemini-2.5-flash-image"]
+        for model_name in model_candidates:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt, image_part],
+                )
+                text = getattr(response, "text", None)
+                if text:
+                    cleaned_text = text.strip()
+                    if cleaned_text.startswith("```") and cleaned_text.endswith("```"):
+                        cleaned_text = cleaned_text.strip("`")
+                    if len(cleaned_text) > 5:
+                        return cleaned_text
+            except Exception as exc:
+                logger.warning("Gemini image analysis failed for %s on %s: %s", image_path, model_name, exc)
+                continue
+    except Exception as exc:
+        logger.warning("Gemini image analysis failed for %s: %s", image_path, exc)
+
+    return local_image_summary(image_path)
+
+
+def analyze_image_labels(image_path: Path) -> list[str]:
+    if yolo_model is None:
+        return []
+
+    try:
+        frame = cv2.imread(str(image_path))
+        if frame is None:
+            return []
+
+        results = yolo_model.predict(frame, verbose=False)
+        if not results:
+            return []
+
+        labels: set[str] = set()
+        for box in results[0].boxes:
+            try:
+                class_id = int(box.cls[0])
+                class_name = resolve_class_name(yolo_model, class_id)
+                if class_name:
+                    labels.add(class_name)
+            except Exception:
+                continue
+
+        return sorted(labels)
+    except Exception:
+        return []
+
+
+def build_inventory_analysis(inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    analysis = []
+    for item in inventory:
+        try:
+            image_path = Path(str(item.get("filepath", "")))
+            if not image_path.exists():
+                logger.warning("Inventory image path does not exist: %s", image_path)
+                continue
+
+            labels = analyze_image_labels(image_path)
+            summary = analyze_image_with_gemini(image_path)
+            analysis.append(
+                {
+                    "id": item.get("id"),
+                    "filepath": item.get("filepath"),
+                    "description": item.get("description", ""),
+                    "yolo_labels": labels,
+                    "summary": summary,
+                }
+            )
+        except Exception as exc:
+            logger.warning("Failed analysis for inventory item %s: %s", item.get("id"), exc)
+            continue
+    return analysis
+
+
+def upsert_image_record(image_id: int, file_path: str, description: str) -> None:
+    timestamp = time.time()
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO images (id, filepath, description, created_at) VALUES (?, ?, ?, ?)",
+                (image_id, file_path, description, timestamp),
+            )
+            connection.commit()
+    except Exception:
+        pass
+
+
+def handle_snapshot(frame: Any, qr_id: int) -> None:
+    image_name = f"qr_{qr_id}.jpg"
+    image_path = IMAGE_DIR / image_name
+
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT filepath FROM images WHERE id = ?",
+                (qr_id,),
+            ).fetchone()
+
+        if row and row["filepath"]:
+            remove_existing_file(row["filepath"])
+    except Exception:
+        pass
+
+    try:
+        save_frame_to_disk(frame, image_path)
+    except Exception:
+        return
+
+    description = "Gemini 분석 불가"
+    try:
+        description = analyze_image_with_gemini(image_path)
+    except Exception:
+        description = "Gemini 분석 불가"
+
+    try:
+        upsert_image_record(qr_id, str(image_path), description)
+    except Exception:
+        pass
+
+
+def detect_numeric_id(frame: Any) -> int | None:
+    if digit_yolo_model is None:
+        return None
+    try:
+        results = digit_yolo_model.predict(frame, verbose=False)
+        boxes = results[0].boxes if results else []
+    except Exception:
+        return None
+
+    candidates: list[tuple[float, int]] = []
+    for box in boxes:
+        try:
+            class_name = resolve_class_name(digit_yolo_model, int(box.cls[0]))
+            numeric_id = parse_valid_qr_id(class_name)
+            if numeric_id is not None:
+                candidates.append((float(box.conf[0]), numeric_id))
+        except Exception:
+            continue
+
+    return max(candidates, default=(0.0, None))[1]
+
+
+def detect_numeric_slot_id(frame: Any) -> int | None:
+    """Detect a 1-10 slot with YOLO, falling back to rendered digit matching."""
+    numeric_id = detect_numeric_id(frame)
+    if numeric_id is not None or frame is None:
+        return numeric_id
+
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+        points = cv2.findNonZero(binary)
+        if points is None:
+            return None
+        x, y, width, height = cv2.boundingRect(points)
+        observed = binary[y:y + height, x:x + width]
+        best_score, best_id = float("inf"), None
+        for candidate in range(1, 11):
+            template = np.full((400, 600), 255, dtype=np.uint8)
+            cv2.putText(template, str(candidate), (120, 260), cv2.FONT_HERSHEY_SIMPLEX, 5.0, 0, 12, cv2.LINE_AA)
+            _, template = cv2.threshold(template, 180, 255, cv2.THRESH_BINARY_INV)
+            template_points = cv2.findNonZero(template)
+            if template_points is None:
+                continue
+            tx, ty, tw, th = cv2.boundingRect(template_points)
+            resized = cv2.resize(template[ty:ty + th, tx:tx + tw], (width, height), interpolation=cv2.INTER_NEAREST)
+            score = float(np.mean(cv2.absdiff(observed, resized)))
+            if score < best_score:
+                best_score, best_id = score, candidate
+        return best_id
+    except Exception:
+        return None
+
+def process_detected_frame(frame: Any) -> None:
+    global last_snapshot_time
+
+    if yolo_model is None or frame is None:
+        return
+
+    try:
+        results = yolo_model.predict(frame, verbose=False)
+    except Exception:
+        return
+
+    try:
+        detections = results[0].boxes if results else []
+    except Exception:
+        detections = []
+
+    clothing_detected = False
+
+    for box in detections:
+        try:
+            class_id = int(box.cls[0])
+            class_name = resolve_class_name(yolo_model, class_id)
+            xyxy = box.xyxy[0].tolist()
+        except Exception:
+            continue
+
+        if is_clothing_like(class_name):
+            clothing_detected = True
+
+    numeric_id = detect_numeric_id(frame)
+    if not clothing_detected or numeric_id is None:
+        return
+    try:
+        current_time = time.time()
+        if current_time - last_snapshot_time < SNAPSHOT_COOLDOWN_SECONDS:
+            return
+    except Exception:
+        return
+    try:
+        last_snapshot_time = time.time()
+        handle_snapshot(frame.copy(), numeric_id)
+    except Exception:
+        pass
+
+
+def apply_stream_brightness(frame: Any) -> Any:
+    with brightness_lock:
+        brightness = stream_brightness
+    if brightness == 0 or frame is None:
+        return frame
+    return cv2.convertScaleAbs(frame, alpha=1.0, beta=brightness)
+
+
+def camera_loop() -> None:
+    while True:
+        capture = None
+        camera_source = None
+        try:
+            camera_source = find_available_camera_source()
+            capture = open_camera_source(camera_source)
+            if not capture.isOpened():
+                raise RuntimeError(f"Camera unavailable: {camera_source}")
+
+            while True:
+                try:
+                    success, frame = capture.read()
+                    if not success or frame is None:
+                        raise RuntimeError("No frame read from camera")
+
+                    frame = apply_stream_brightness(frame)
+                    # Detect clothing and add blue border overlay
+                    clothing_boxes = detect_clothing_simple(frame)
+                    overlay_frame = draw_clothing_overlay(frame, clothing_boxes)
+
+                    with frame_lock:
+                        global latest_frame
+                        latest_frame = overlay_frame.copy()
+
+                    try:
+                        process_detected_frame(frame)
+                    except Exception:
+                        pass
+
+                    time.sleep(STREAM_FRAME_DELAY_SECONDS)
+                except Exception:
+                    with frame_lock:
+                        latest_frame = create_placeholder_frame(
+                            f"Camera unavailable: {camera_source}"
+                        )
+                    time.sleep(0.5)
+        except Exception:
+            with frame_lock:
+                latest_frame = create_placeholder_frame(
+                    f"Camera unavailable: {camera_source or CAMERA_DEVICE}"
+                )
+            time.sleep(1.0)
+        finally:
+            try:
+                if capture is not None:
+                    capture.release()
+            except Exception:
+                pass
+
+
+def start_camera_thread_once() -> None:
+    global camera_thread_started
+
+    with camera_lock:
+        if camera_thread_started:
+            return
+        camera_thread_started = True
+
+        thread = threading.Thread(target=camera_loop, daemon=True)
+        thread.start()
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    initialize_mqtt()
+    start_camera_thread_once()
+
+
+@app.api_route("/api/send_id/{image_id}", methods=["GET", "POST"])
+def send_image_id(image_id: int) -> JSONResponse:
+    if image_id not in VALID_QR_IDS:
+        raise HTTPException(status_code=400, detail="Image ID must be between 1 and 10")
+
+    published = publish_slot_id(image_id)
+    if not published:
+        raise HTTPException(status_code=502, detail="Failed to publish to MQTT broker")
+
+    return JSONResponse(
+        content={
+            "ok": True,
+            "id": image_id,
+            "topic": MQTT_TOPIC,
+            "broker": MQTT_BROKER_HOST,
+        }
+    )
+
+
+@app.get("/api/closet")
+def list_closet_items() -> JSONResponse:
+    try:
+        inventory = fetch_closet_inventory()
+        return JSONResponse(content=inventory)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/context")
+def receive_context(context: ContextPayload) -> JSONResponse:
+    try:
+        save_context_record(context.dict())
+        return JSONResponse(content={"ok": True, "message": "Context saved"})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/context")
+def get_context() -> JSONResponse:
+    try:
+        latest = fetch_latest_context()
+        if latest is None:
+            raise HTTPException(status_code=404, detail="No context saved yet")
+        return JSONResponse(content=latest)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/closet/{image_id}")
+def get_closet_item(image_id: int) -> JSONResponse:
+    try:
+        inventory = fetch_closet_inventory()
+        for item in inventory:
+            if int(item.get("id", -1)) == image_id:
+                return JSONResponse(content=item)
+        raise HTTPException(status_code=404, detail="Item not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def get_image_download_url(request: Request, image_id: int) -> str:
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                "SELECT filepath FROM images WHERE id = ?",
+                (image_id,),
+            ).fetchone()
+        if not row or not row["filepath"]:
+            return f"{request.url.scheme}://{request.url.hostname}:{request.url.port}/images/download/qr_{image_id}.jpg"
+        filename = Path(str(row["filepath"])).name
+        return f"{request.url.scheme}://{request.url.hostname}:{request.url.port}/images/download/{filename}"
+    except Exception:
+        return f"{request.url.scheme}://{request.url.hostname}:{request.url.port}/images/download/qr_{image_id}.jpg"
+
+
+def parse_exclude_ids(exclude_ids: str | None) -> set[int]:
+    if not exclude_ids:
+        return set()
+
+    results: set[int] = set()
+    for raw_value in exclude_ids.split(","):
+        try:
+            parsed = int(str(raw_value).strip())
+            results.add(parsed)
+        except Exception:
+            continue
+    return results
+
+
+def get_recommendation_ids(
+    inventory: list[dict[str, Any]],
+    weather_info: dict[str, Any],
+    context: dict[str, Any] | None = None,
+    exclude_ids: set[int] | None = None,
+) -> list[int]:
+    inventory_ids = [item["id"] for item in inventory]
+    if exclude_ids:
+        inventory_ids = [image_id for image_id in inventory_ids if image_id not in exclude_ids]
+
+    if not inventory_ids:
+        return []
+
+    if genai is None:
+        return choose_fallback_ids(inventory_ids, context)
+
+    context_description = ""
+    if context is not None:
+        context_description = (
+            f"Current app context:\n"
+            f"AQI: {context.get('aqi')}\n"
+            f"Location: {context.get('latitude')}, {context.get('longitude')}\n"
+            f"Schedule: {json.dumps(context.get('schedule', []), ensure_ascii=False)}\n"
+        )
+
+    prompt = (
+        f"Given the current outdoor weather of {weather_info['temperature_c']}°C "
+        f"({weather_info['conditions']}), look through this local closet inventory JSON data "
+        "and select exactly 3 item IDs that best layer or match with the user's outfit. "
+        "Return ONLY a raw JSON array of integers containing the selected IDs. Do not include markdown wraps or additional conversational text.\n\n"
+        f"{context_description}"
+        f"Inventory: {json.dumps(inventory, ensure_ascii=False)}"
+    )
+
+    try:
+        client = get_gemini_client()
+        if client is None:
+            raise RuntimeError("Gemini client unavailable")
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        raw_text = getattr(response, "text", "") or ""
+        cleaned = strip_json_wrappers(raw_text)
+        parsed = json.loads(cleaned)
+        if not isinstance(parsed, list):
+            raise ValueError("Gemini response is not a list")
+
+        selected_ids: list[int] = []
+        for value in parsed:
+            try:
+                parsed_value = int(value)
+                if parsed_value not in selected_ids:
+                    selected_ids.append(parsed_value)
+            except Exception:
+                continue
+
+        valid_ids = {item["id"] for item in inventory}
+        selected_ids = [value for value in selected_ids if value in valid_ids]
+
+        if len(selected_ids) >= 3:
+            return normalize_three_ids(selected_ids)
+    except Exception:
+        pass
+
+    return choose_fallback_ids(inventory_ids, context)
+
+
+@app.get("/api/recommend/context")
+def recommend_from_context(request: Request, exclude_ids: str | None = None) -> JSONResponse:
+    latest_context = fetch_latest_context()
+    if latest_context is None:
+        raise HTTPException(status_code=404, detail="No context saved yet")
+
+    inventory = fetch_closet_inventory()
+    if not inventory:
+        return JSONResponse(content={"recommendations": []})
+
+    weather_info = {
+        "temperature_c": 0,
+        "conditions": latest_context.get("weather", "Unknown"),
+    }
+    excluded = parse_exclude_ids(exclude_ids)
+    selected_ids = get_recommendation_ids(inventory, weather_info, latest_context, excluded)
+
+    recommendations = []
+    for image_id in selected_ids:
+        recommendations.append(
+            {
+                "id": image_id,
+                "download_url": get_image_download_url(request, image_id),
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "context": latest_context,
+            "recommendations": recommendations,
+        }
+    )
+
+
+class ExcludeRecommendationPayload(BaseModel):
+    exclude_ids: list[int]
+
+
+@app.get("/api/recommend/different")
+def recommend_different(request: Request, exclude_ids: str | None = None) -> JSONResponse:
+    latest_context = fetch_latest_context()
+    inventory = fetch_closet_inventory()
+    if not inventory:
+        return JSONResponse(content={"recommendations": []})
+
+    weather_info = {
+        "temperature_c": 0,
+        "conditions": latest_context.get("weather", "Unknown") if latest_context else "Unknown",
+    }
+    excluded = parse_exclude_ids(exclude_ids)
+    selected_ids = get_recommendation_ids(inventory, weather_info, latest_context, excluded)
+
+    recommendations = []
+    for image_id in selected_ids:
+        recommendations.append(
+            {
+                "id": image_id,
+                "download_url": get_image_download_url(request, image_id),
+            }
+        )
+
+    return JSONResponse(content={"recommendations": recommendations})
+
+
+@app.post("/api/recommend/different")
+def recommend_different_post(request: Request, payload: ExcludeRecommendationPayload) -> JSONResponse:
+    latest_context = fetch_latest_context()
+    inventory = fetch_closet_inventory()
+    if not inventory:
+        return JSONResponse(content={"recommendations": []})
+
+    weather_info = {
+        "temperature_c": 0,
+        "conditions": latest_context.get("weather", "Unknown") if latest_context else "Unknown",
+    }
+    excluded = set(payload.exclude_ids or [])
+    selected_ids = get_recommendation_ids(inventory, weather_info, latest_context, excluded)
+
+    recommendations = []
+    for image_id in selected_ids:
+        recommendations.append(
+            {
+                "id": image_id,
+                "download_url": get_image_download_url(request, image_id),
+            }
+        )
+
+    return JSONResponse(content={"recommendations": recommendations})
+
+
+@app.get("/api/recommend/analyze")
+def recommend_with_analysis(request: Request, exclude_ids: str | None = None) -> JSONResponse:
+    inventory = fetch_closet_inventory()
+    if not inventory:
+        return JSONResponse(content={"recommendations": []})
+
+    excluded = parse_exclude_ids(exclude_ids)
+    filtered_inventory = [item for item in inventory if item.get("id") not in excluded]
+    if not filtered_inventory:
+        return JSONResponse(content={"recommendations": []})
+
+    analyses = build_inventory_analysis(filtered_inventory)
+
+    if not analyses:
+        selected_ids = []
+    else:
+        def score_analysis_item(item: dict[str, Any]) -> int:
+            score = len(item.get("yolo_labels", [])) * 2
+            summary = str(item.get("summary", ""))
+            score += min(5, max(0, len(summary.split())))
+            if "clothing" in summary.lower() or "톤" in summary.lower():
+                score += 1
+            return score
+
+        scores = [score_analysis_item(item) for item in analyses]
+        analyses.sort(key=score_analysis_item, reverse=True)
+
+        if len(analyses) > 3 and min(scores) == max(scores):
+            selected_ids = choose_fallback_ids([item["id"] for item in analyses], fetch_latest_context())
+        else:
+            selected_ids = [item["id"] for item in analyses[:3]]
+
+        if len(selected_ids) < 3:
+            fallback_ids = get_recommendation_ids(filtered_inventory, get_weather_info(), fetch_latest_context())
+            for image_id in fallback_ids:
+                if image_id not in selected_ids and len(selected_ids) < 3:
+                    selected_ids.append(image_id)
+
+    recommendations = []
+    for image_id in selected_ids:
+        analysis_item = next((item for item in analyses if item["id"] == image_id), None)
+        recommendations.append(
+            {
+                "id": image_id,
+                "download_url": get_image_download_url(request, image_id),
+                "yolo_labels": analysis_item["yolo_labels"] if analysis_item else [],
+                "summary": analysis_item["summary"] if analysis_item else "No analysis available",
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "recommendations": recommendations,
+            "analysis_count": len(analyses),
+        }
+    )
+
+
+@app.get("/", response_class=HTMLResponse)
+def home() -> HTMLResponse:
+        inventory = fetch_closet_inventory()
+
+        rows_html = []
+        if inventory:
+                for item in inventory:
+                        image_id = item.get('id', '')
+                        file_path = item.get('filepath', '')
+                        image_name = Path(str(file_path)).name if file_path else ""
+                        image_url = f"/images/download/{image_name}" if image_name else ""
+                        preview_html = (
+                                f"<div class='preview-card'>"
+                                f"<button type='button' class='send-btn' onclick='sendSlot({image_id})'>📤</button>"
+                                f"<img src=\"{image_url}\" alt=\"{image_name}\" class=\"preview\" />"
+                                f"</div>"
+                        ) if image_url else ""
+                        rows_html.append(
+                                "<tr>"
+                                f"<td>{image_id}</td>"
+                                f"<td>{preview_html}</td>"
+                                f"<td>{file_path}</td>"
+                                f"<td>{item.get('description', '')}</td>"
+                                f"<td>{item.get('created_at', '')}</td>"
+                                "</tr>"
+                        )
+                db_section = """
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Preview</th>
+                                <th>File Path</th>
+                                <th>Description</th>
+                                <th>Created At</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                """ + "".join(rows_html) + """
+                        </tbody>
+                    </table>
+                """
+        else:
+                db_section = "<div class='empty-state'>DB에 아직 저장된 항목이 없습니다.</div>"
+
+        html = """
+        <!doctype html>
+        <html lang="ko">
+            <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Smart Closet Backend</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        margin: 0;
+                        min-height: 100vh;
+                        display: grid;
+                        place-items: center;
+                        background: linear-gradient(135deg, #f7f7f7, #e8eef7);
+                        color: #1f2937;
+                    }
+                    .card {
+                        background: white;
+                        padding: 32px;
+                        border-radius: 16px;
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+                        max-width: 640px;
+                        width: calc(100% - 32px);
+                    }
+                    .section {
+                        margin-top: 24px;
+                        padding-top: 20px;
+                        border-top: 1px solid #e5e7eb;
+                    }
+                    h1 { margin-top: 0; }
+                    .links a {
+                        display: inline-block;
+                        margin-right: 12px;
+                        margin-bottom: 12px;
+                        padding: 10px 14px;
+                        border-radius: 999px;
+                        background: #111827;
+                        color: white;
+                        text-decoration: none;
+                    }
+                    .links a.secondary { background: #2563eb; }
+                    code { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; }
+                    form {
+                        display: grid;
+                        gap: 10px;
+                        margin-top: 16px;
+                    }
+                    form label {
+                        display: block;
+                        font-weight: bold;
+                        margin-bottom: 4px;
+                    }
+                    form select,
+                    form input[type=file],
+                    form button {
+                        width: 100%;
+                        padding: 10px;
+                        border-radius: 10px;
+                        border: 1px solid #d1d5db;
+                        font-size: 14px;
+                    }
+                    form button {
+                        background: #111827;
+                        color: white;
+                        border: none;
+                        cursor: pointer;
+                    }
+                    form button:hover {
+                        background: #1f2937;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 12px;
+                        font-size: 14px;
+                    }
+                    th, td {
+                        text-align: left;
+                        border-bottom: 1px solid #e5e7eb;
+                        padding: 10px 8px;
+                        vertical-align: top;
+                        word-break: break-word;
+                    }
+                    th {
+                        background: #f9fafb;
+                    }
+                    .empty-state {
+                        margin-top: 12px;
+                        padding: 14px;
+                        border-radius: 12px;
+                        background: #f9fafb;
+                        color: #6b7280;
+                    }
+                    .preview {
+                        max-width: 120px;
+                        max-height: 90px;
+                        object-fit: contain;
+                        border: 1px solid #e5e7eb;
+                        border-radius: 8px;
+                        background: #fff;
+                    }
+                    .preview-card {
+                        display: inline-flex;
+                        flex-direction: column;
+                        gap: 8px;
+                        align-items: flex-start;
+                    }
+                    .send-btn {
+                        border: none;
+                        border-radius: 999px;
+                        background: #2563eb;
+                        color: white;
+                        padding: 6px 10px;
+                        cursor: pointer;
+                        font-size: 12px;
+                    }
+                </style>
+                <script>
+                    async function sendSlot(imageId) {
+                        try {
+                            const response = await fetch(`/api/send_id/${imageId}`, { method: 'POST' });
+                            const data = await response.json();
+                            if (response.ok) {
+                                alert(`전송 완료: id=${data.id}`);
+                            } else {
+                                alert(`전송 실패: ${data.detail || 'unknown error'}`);
+                            }
+                        } catch (error) {
+                            alert('전송 실패: MQTT 브로커 연결 오류');
+                        }
+                    }
+                </script>
+            </head>
+            <body>
+                <main class="card">
+                    <h1>Smart Closet Backend</h1>
+                    <p>서버가 정상 동작 중입니다.</p>
+                    <p>확인할 주소:</p>
+                    <div class="links">
+                        <a href="/docs">API Docs</a>
+                        <a class="secondary" href="/video_feed">MJPEG Stream</a>
+                    </div>
+                    <div class="section">
+                        <h2>DB 상태</h2>
+                        <p>추천 API: <code>/api/recommend</code></p>
+                        <p>파일 업로드: id 1~10에 해당하는 JPG/PNG 이미지를 업로드하면 자동으로 저장 및 DB에 반영됩니다.</p>
+                        <form id="upload-form" action="/api/upload/1" method="post" enctype="multipart/form-data">
+                            <label for="upload-id">ID</label>
+                            <select id="upload-id" name="id" onchange="document.getElementById('upload-form').action='/api/upload/'+this.value;">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                            </select>
+                            <input type="file" name="file" accept="image/jpeg,image/png" required />
+                            <button type="submit">업로드</button>
+                        </form>
+                        __DB_SECTION__
+                    </div>
+                </main>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html.replace("__DB_SECTION__", db_section))
+
+
+@app.get("/video_feed")
+def video_feed() -> StreamingResponse:
+    def generate_frames() -> Iterable[bytes]:
+        while True:
+            try:
+                with frame_lock:
+                    frame = None if latest_frame is None else latest_frame.copy()
+
+                if frame is None:
+                    frame = create_placeholder_frame("Camera unavailable")
+
+                try:
+                    success, buffer = cv2.imencode(".jpg", frame)
+                    if not success:
+                        time.sleep(STREAM_FRAME_DELAY_SECONDS)
+                        continue
+                except Exception:
+                    time.sleep(STREAM_FRAME_DELAY_SECONDS)
+                    continue
+
+                payload = buffer.tobytes()
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + payload + b"\r\n"
+                )
+                time.sleep(STREAM_FRAME_DELAY_SECONDS)
+            except Exception:
+                time.sleep(STREAM_FRAME_DELAY_SECONDS)
+
+    return StreamingResponse(
+        generate_frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/images/download/{filename}")
+def download_image(filename: str) -> Response:
+    try:
+        safe_name = Path(filename).name
+        file_path = IMAGE_DIR / safe_name
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+        return Response(content=file_path.read_bytes(), media_type=media_type)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+
+@app.post("/api/upload/{image_id}")
+def upload_image(image_id: int, file: UploadFile = File(...)) -> JSONResponse:
+    if image_id not in VALID_QR_IDS:
+        raise HTTPException(status_code=400, detail="Image ID must be between 1 and 10")
+
+    if file.content_type not in {"image/jpeg", "image/jpg", "image/png"}:
+        raise HTTPException(status_code=400, detail="File must be a JPG or PNG image")
+
+    try:
+        file_bytes = file.file.read()
+        extension = ".jpg" if file.content_type != "image/png" else ".png"
+        image_path = IMAGE_DIR / f"qr_{image_id}{extension}"
+        with open(image_path, "wb") as out_file:
+            out_file.write(file_bytes)
+
+        description = f"Uploaded image for id {image_id}"
+        upsert_image_record(image_id, str(image_path), description)
+        return JSONResponse(content={"id": image_id, "filepath": str(image_path), "description": description})
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save uploaded image")
+
+
+def fetch_closet_inventory() -> list[dict[str, Any]]:
+    try:
+        with get_connection() as connection:
+            rows = connection.execute(
+                "SELECT id, filepath, description, created_at FROM images ORDER BY id ASC"
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+    except Exception:
+        return []
+
+
+def strip_json_wrappers(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[:-3]
+    return text.strip()
+
+
+def normalize_three_ids(candidate_ids: list[int]) -> list[int]:
+    unique_ids: list[int] = []
+    for image_id in candidate_ids:
+        if image_id not in unique_ids:
+            unique_ids.append(image_id)
+
+    if not unique_ids:
+        return []
+
+    index = 0
+    while len(unique_ids) < 3:
+        unique_ids.append(unique_ids[index % len(unique_ids)])
+        index += 1
+
+    return unique_ids[:3]
+
+
+def choose_fallback_ids(inventory_ids: list[int], context: dict[str, Any] | None = None) -> list[int]:
+    if not inventory_ids:
+        return []
+
+    if len(inventory_ids) <= 3:
+        return inventory_ids.copy()
+
+    start = 0
+    if context is not None:
+        seed_text = (
+            f"{context.get('weather', '')}|{context.get('aqi', '')}|"
+            f"{context.get('latitude', '')}|{context.get('longitude', '')}|"
+            f"{json.dumps(context.get('schedule', []), ensure_ascii=False)}"
+        )
+        start = abs(hash(seed_text)) % len(inventory_ids)
+
+    step = max(1, len(inventory_ids) // 3)
+    selected: list[int] = []
+    idx = start
+
+    while len(selected) < 3:
+        candidate = inventory_ids[idx]
+        if candidate not in selected:
+            selected.append(candidate)
+        idx = (idx + step) % len(inventory_ids)
+
+    return selected
+
+
+@app.get("/api/recommend")
+def recommend(request: Request) -> JSONResponse:
+    weather_info = get_weather_info()
+    latest_context = fetch_latest_context()
+    inventory = fetch_closet_inventory()
+    selected_ids = get_recommendation_ids(inventory, weather_info, latest_context)
+
+    response_payload = []
+    for image_id in selected_ids:
+        response_payload.append(
+            {
+                "id": image_id,
+                "download_url": get_image_download_url(request, image_id),
+            }
+        )
+
+    return JSONResponse(content=response_payload)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
