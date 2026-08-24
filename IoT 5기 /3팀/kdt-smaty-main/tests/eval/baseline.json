@@ -1,0 +1,1515 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-19T12:11:55.107613+00:00",
+  "model": "gpt-5.6-terra (운영 기본값, reasoning low)",
+  "commit": "09970fb",
+  "note": "250건 전체 실행. <profile_memory> 주입과 tracing 비활성을 운영과 맞춘 뒤 측정.",
+  "summary": {
+    "total": 250,
+    "passed": 232,
+    "failed": 18,
+    "failure_rate": 0.072
+  },
+  "cases": [
+    {
+      "utterance": "모니터 두 대 쓴다고 한 거 잊어줘",
+      "expected_tool": "forget_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "서서 일할 때 높이 기억한 거 지워줘",
+      "expected_tool": "forget_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "앉을 때 높이 기억해둔 거 삭제해줘",
+      "expected_tool": "forget_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "저장해둔 틸팅 단계 선호 잊어버려",
+      "expected_tool": "forget_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 취향 기억한 거 없애줘",
+      "expected_tool": "forget_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울기 몇 단계까지 돼?",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 기울기 상태 알려줘",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 지금 평평해?",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "지금 틸트 상태가 어때?",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "지금 틸팅 몇 단계야?",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸트 지금 어느 정도지?",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 범위가 어떻게 되지?",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 설정 확인해줘",
+      "expected_tool": "get_tilt_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "쓸 수 있는 조명 효과 뭐 있어?",
+      "expected_tool": "get_wled_capabilities",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "어떤 팔레트 쓸 수 있어?",
+      "expected_tool": "get_wled_capabilities",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 효과 종류 보여줘",
+      "expected_tool": "get_wled_capabilities",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "효과 목록 알려줘",
+      "expected_tool": "get_wled_capabilities",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "LED 상태 알려줘",
+      "expected_tool": "get_wled_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 밝기 얼마야?",
+      "expected_tool": "get_wled_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 지금 어떤 상태지?",
+      "expected_tool": "get_wled_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "지금 무슨 색이야?",
+      "expected_tool": "get_wled_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "지금 조명 켜져 있어?",
+      "expected_tool": "get_wled_state",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "너무 낮아",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "너무 높아",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "높이 내려줘",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "높이 올려",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "아래로 내려줄래?",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "위로 좀 올려주세요",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조금만 더 내려",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조금만 더 올려줘",
+      "expected_tool": "hold_desk",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "책상 내려주세요",
+      "expected_tool": "hold_desk",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "책상 다운",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 업",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 올려줘",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 좀 낮춰줘",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 좀 더 높게",
+      "expected_tool": "hold_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상이 낮은 것 같아",
+      "expected_tool": "hold_desk",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "책상이 좀 높은 것 같은데",
+      "expected_tool": "hold_desk",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "내가 만들어놓은 모드 뭐뭐 있지?",
+      "expected_tool": "list_activity_modes",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "모드 목록 보여줘",
+      "expected_tool": "list_activity_modes",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "설정된 모드 종류가 뭐야?",
+      "expected_tool": "list_activity_modes",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "쓸 수 있는 작업 모드 알려줘",
+      "expected_tool": "list_activity_modes",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "어떤 모드들 있어?",
+      "expected_tool": "list_activity_modes",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "작업 모드 어떤 거 고를 수 있어?",
+      "expected_tool": "list_activity_modes",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기억해줘, 나는 저녁 9시 이후엔 조명 어둡게 하는 걸 좋아해",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "나 커피 안 마시는 거 기억해",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "나 허리 디스크 있는 거 기억하고 있어줘",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "내 선호 틸팅 단계는 2단계야, 저장해줘",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "내 이름은 동현이야, 기억해줘",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "내가 앉을 때 높이는 72센티인 거 기억해줘",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "다음부터는 설명 짧게 해줘, 기억해둬",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "앞으로 이렇게 해줘: 아침엔 항상 스탠딩 모드",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "앞으로 조명은 항상 따뜻한 색으로 해줘, 기억해둬",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "이거 기억해놔: 나는 오후에 주로 서서 일해",
+      "expected_tool": "remember_fact",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "나 지금 리액트 공부하고 있어",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "너 뭐 할 수 있어?",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스탠딩 데스크가 건강에 좋아?",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "어제 늦게 잤어",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "오늘 좀 피곤하네",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "이 책상 꽤 괜찮은 것 같아",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "작업 모드가 뭐야?",
+      "expected_tool": "request_followup",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "점심으로 김치찌개 먹었어",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 높이 어떻게 조절해?",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 기능은 어떻게 쓰는 거야?",
+      "expected_tool": "request_followup",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게이밍 모드로 전환해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게임 모드 적용해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게임 모드 켜",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게임 모드로 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게임 세팅으로 해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게임하기 좋게 세팅해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "게임할 때 쓰는 그 모드로",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부 모드 적용",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부 모드 켜줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부 모드로 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부 모드로 전환 부탁해",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부용 세팅으로 돌려줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부하는 환경으로 세팅해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "공부할래",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기본 모드로 돌려줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "기본 설정으로 되돌려줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "기본으로 초기화해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "디폴트 모드로",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "롤 한판 할건데 모드 좀",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "릴랙스 모드로",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "서서 일하는 모드로 해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "서서 하는 세팅으로 바꿔줄래",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "쉬는 시간이야",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스탠딩 모드 적용",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스탠딩 모드 켜줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "스탠딩 모드로 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스탠딩 모드로 전환해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "스터디 모드",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "시험 기간이라 공부해야 돼, 모드 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "원래대로 돌려놔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "이제 게임할 거야",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "이제 공부 시작할게",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "잠깐 쉬는 모드로 해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "잠깐 쉬었다 할래, 모드 좀 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "좀 쉴게",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "집중해서 공부할 수 있게 해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 공부 모드로 해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "친구들이랑 게임하려고, 모드 바꿔줄래?",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "피곤한데 쉬는 분위기로 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "휴식 모드 켜줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "휴식 모드로 바꿔줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "휴식 모드로 전환",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "휴식 세팅 적용해줘",
+      "expected_tool": "set_activity_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "내가 직접 조절할게",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "수동 모드로 전환",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "수동으로 바꿔",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "알아서 높이 조절해줘",
+      "expected_tool": "set_control_mode",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "자동 높이 조절 켜줘",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "자동 모드로 바꿔줘",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "자동 조절 꺼줘",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "자동으로 해줘",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상이 자꾸 혼자 움직이는데 그거 꺼줘",
+      "expected_tool": "set_control_mode",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "105센티까지 올려",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "1미터 20으로 올려줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "70센치로 내려줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "계속 앉아 있었더니 허리가 힘드네, 서서 하자",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "높이 80으로 해줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "높이 85센티로 고정해줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "높이 설정 76",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "높이를 65로 부탁해",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "다리 아파서 앉아야겠어",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "데스크 높이 95센티",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "서서 쓸 수 있게 올려줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스탠딩 높이로 맞춰줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스탠딩으로 전환",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "앉아서 일할 높이로 내려줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "앉은 자세로 바꿔줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "앉을 수 있게 해줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "이제 좀 앉을게",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "일단 78센티에 맞춰놔줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "일어서서 일하고 싶어",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "지금 책상을 74센티로 만들어줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 112센티미터로 옮겨줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 1미터로 맞춰",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 75센티로 맞춰줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 높이 110센티미터로 올려줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 높이 118로 변경",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 높이 백센치로 해줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 높이 백십센티로",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 높이를 68센티로 낮춰주세요",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 서서 쓰는 높이",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 좀 90에 맞춰줄래?",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상을 72.5센티로 세팅해줘",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "허리가 아픈데 일어설래",
+      "expected_tool": "set_desk_target",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "글씨 쓰기 편하게 좀 기울여줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울기 2단계로 맞춰줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울기 단계 2로 해줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울기 살짝 줄여줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울기 없애줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울기 최대로",
+      "expected_tool": "set_tilt_level",
+      "passed": false,
+      "reason": "args_mismatch"
+    },
+    {
+      "utterance": "기울인 거 풀어줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "너무 기울었어, 좀 낮춰줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 3단계로 기울여줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 각도 초기화해줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 기울기 2단계 부탁해",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 좀 더 기울여줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 최대한 기울여줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 평평하게 해줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판이 너무 눕혀져 있는데 더 세워줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조금만 더 세워줘",
+      "expected_tool": "set_tilt_level",
+      "passed": false,
+      "reason": "tool_not_called"
+    },
+    {
+      "utterance": "책상 다시 수평으로",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 상판 3단계",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸트 1단계",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸트 2단으로 세팅",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸트 끝까지 올려줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸트 레벨 1로 설정",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 0단계로",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 2단계로 해줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 3단계로 올려줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 끄고 원래대로 돌려줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 안 쓸래, 평평하게",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 원위치",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 제일 높게 해줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 한 단계 내려",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 한 단계만 올려줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅을 1단계로 바꿔줘",
+      "expected_tool": "set_tilt_level",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "너무 밝아, 좀 줄여줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "밝기 100으로 맞춰줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "밝기 200으로 설정",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "밝기 50퍼센트로",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "밝기 80퍼로 올려줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "밝기 최대로 해줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "은은하게 해줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "제일 밝게",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 밝게 해줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 절반 밝기로 해줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 좀 어둡게 해줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 최소로 낮춰줘",
+      "expected_tool": "set_wled_brightness",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "노란색으로 해줘",
+      "expected_tool": "set_wled_color",
+      "passed": false,
+      "reason": "args_mismatch"
+    },
+    {
+      "utterance": "따뜻한 색으로 바꿔줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "보라색으로 바꿔줄래?",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "불 빨갛게 해줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "색상 FF0000으로 설정해줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 빨간색으로 바꿔줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 색 00FF00으로",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 주황색으로 해줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 파랗게",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 하얀색으로",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "차가운 색감으로 해줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "초록색으로 바꿔줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "파란색으로 해줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "핑크색으로 바꿔줘",
+      "expected_tool": "set_wled_color",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "레인보우 효과 켜줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "무지개 효과로 바꿔줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "불꽃 효과 켜줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "브리드 효과 적용해줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "오로라 효과로 바꿔줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 숨쉬는 효과로 해줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명에 효과 좀 넣어줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "효과 끄고 단색으로 해줘",
+      "expected_tool": "set_wled_effect",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "그만",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "됐어 거기서 멈춰",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "멈춰",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스톱",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "스톱! 지금 높이 좋아",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "어어 그만그만",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "정지해",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 멈춰줘",
+      "expected_tool": "stop_desk",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "기울이는 거 멈춰줘",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 그만 움직여",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "상판 멈춰줘",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "어 그만, 상판 거기서 멈춰",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸트 정지",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 그만해",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 멈춰",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "틸팅 스톱",
+      "expected_tool": "stop_tilt",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "LED 꺼줘",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "눈부신데 불 꺼",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "라이트 오프",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "불 꺼줘",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "불 끄고 자자",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "이제 조명 필요 없어",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 꺼",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 좀 꺼줄래?",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 조명 꺼주세요",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상등 꺼줘",
+      "expected_tool": "turn_wled_off",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "LED 켜줘",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "너무 컴컴해",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "라이트 온",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "불 켜",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "불 켜줘",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "어두운데 불 좀 켜줘",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 좀 켜줄래?",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "조명 켜",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상 조명 켜주세요",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    },
+    {
+      "utterance": "책상등 켜줘",
+      "expected_tool": "turn_wled_on",
+      "passed": true,
+      "reason": "ok"
+    }
+  ]
+}

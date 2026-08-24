@@ -1,0 +1,268 @@
+# 책상 높이 제어 발화.
+#
+# 현재 tool 집합에는 책상 높이를 읽는 tool이 없다. 따라서 목표 높이가 없는
+# 상대 명령("조금만 낮춰줘")은 hold_desk로 움직이다 멈추는 것이 유일하게
+# 합리적인 선택이고, 구체적인 수치가 있으면 set_desk_target이다.
+
+# --- 명시적인 목표 높이 ---
+- utterance: "책상 75센티로 맞춰줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 75}
+
+- utterance: "높이 80으로 해줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 80}
+
+- utterance: "책상 높이 110센티미터로 올려줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 110}
+
+- utterance: "70센치로 내려줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 70}
+
+- utterance: "책상 1미터로 맞춰"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 100}
+  notes: "미터 단위를 센티미터로 환산해야 한다."
+
+- utterance: "1미터 20으로 올려줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 120}
+
+- utterance: "책상을 72.5센티로 세팅해줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 72.5}
+
+- utterance: "높이를 65로 부탁해"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 65}
+
+- utterance: "데스크 높이 95센티"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 95}
+
+- utterance: "책상 높이 백십센티로"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 110}
+  notes: "한글 수사를 숫자로 해석해야 한다."
+
+- utterance: "일단 78센티에 맞춰놔줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 78}
+
+- utterance: "책상 높이 118로 변경"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 118}
+
+- utterance: "높이 85센티로 고정해줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 85}
+
+- utterance: "책상 좀 90에 맞춰줄래?"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 90}
+
+- utterance: "책상 높이를 68센티로 낮춰주세요"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 68}
+
+- utterance: "105센티까지 올려"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 105}
+
+- utterance: "책상 높이 백센치로 해줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 100}
+
+- utterance: "높이 설정 76"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 76}
+
+- utterance: "책상 112센티미터로 옮겨줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 112}
+
+- utterance: "지금 책상을 74센티로 만들어줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: 74}
+
+# --- 자세 기반 요청: 구체적 수치는 없지만 목표 자세가 분명하다 ---
+- utterance: "앉을 수 있게 해줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 60, max: 85}}
+  notes: "착석 자세에 해당하는 높이여야 한다."
+
+- utterance: "이제 좀 앉을게"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 60, max: 85}}
+
+- utterance: "앉은 자세로 바꿔줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 60, max: 85}}
+
+- utterance: "다리 아파서 앉아야겠어"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 60, max: 85}}
+
+- utterance: "앉아서 일할 높이로 내려줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 60, max: 85}}
+
+- utterance: "일어서서 일하고 싶어"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+
+- utterance: "서서 쓸 수 있게 올려줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+
+- utterance: "스탠딩 높이로 맞춰줘"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+  accept_also: [set_activity_mode]
+  notes: "스탠딩 작업 모드로 해석하는 것도 제품상 옳다."
+
+- utterance: "허리가 아픈데 일어설래"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+
+- utterance: "계속 앉아 있었더니 허리가 힘드네, 서서 하자"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+
+- utterance: "스탠딩으로 전환"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+  accept_also: [set_activity_mode]
+
+- utterance: "책상 서서 쓰는 높이"
+  expected_tool: set_desk_target
+  expected_args_match: {height_cm: {min: 95, max: 130}}
+
+# --- 상대적인 높이 변경: 목표가 없으므로 hold_desk ---
+- utterance: "책상 좀 낮춰줘"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "높이 내려줘"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "조금만 더 내려"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "책상 내려주세요"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "너무 높아"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "책상이 좀 높은 것 같은데"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "아래로 내려줄래?"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "책상 다운"
+  expected_tool: hold_desk
+  expected_args_match: {direction: down}
+
+- utterance: "책상 올려줘"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "높이 올려"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "조금만 더 올려줘"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "너무 낮아"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "책상이 낮은 것 같아"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "위로 좀 올려주세요"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "책상 업"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+- utterance: "책상 좀 더 높게"
+  expected_tool: hold_desk
+  expected_args_match: {direction: up}
+
+# --- 정지: 안전 명령 ---
+- utterance: "멈춰"
+  expected_tool: stop_desk
+
+- utterance: "스톱"
+  expected_tool: stop_desk
+
+- utterance: "그만"
+  expected_tool: stop_desk
+
+- utterance: "책상 멈춰줘"
+  expected_tool: stop_desk
+
+- utterance: "정지해"
+  expected_tool: stop_desk
+
+- utterance: "어어 그만그만"
+  expected_tool: stop_desk
+
+- utterance: "됐어 거기서 멈춰"
+  expected_tool: stop_desk
+
+- utterance: "스톱! 지금 높이 좋아"
+  expected_tool: stop_desk
+
+# --- 제어 모드 ---
+- utterance: "자동 모드로 바꿔줘"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: auto}
+
+- utterance: "자동으로 해줘"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: auto}
+
+- utterance: "알아서 높이 조절해줘"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: auto}
+
+- utterance: "자동 높이 조절 켜줘"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: auto}
+
+- utterance: "수동 모드로 전환"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: manual}
+
+- utterance: "수동으로 바꿔"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: manual}
+
+- utterance: "자동 조절 꺼줘"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: manual}
+
+- utterance: "내가 직접 조절할게"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: manual}
+
+- utterance: "책상이 자꾸 혼자 움직이는데 그거 꺼줘"
+  expected_tool: set_control_mode
+  expected_args_match: {mode: manual}

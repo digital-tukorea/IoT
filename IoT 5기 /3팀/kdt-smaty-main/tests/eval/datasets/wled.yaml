@@ -1,0 +1,237 @@
+# LED 조명(WLED) 발화.
+#
+# 밝기는 0~255 정수다. 사용자는 보통 퍼센트나 형용사로 말하므로 정확한 한 값
+# 대신 범위로 기대한다. 효과 id는 fixtures.py의 WLED_EFFECTS에서만 오고,
+# model은 get_wled_capabilities로 조회한 뒤 골라야 한다.
+
+# --- 켜기 ---
+- utterance: "불 켜줘"
+  expected_tool: turn_wled_on
+
+- utterance: "조명 켜"
+  expected_tool: turn_wled_on
+
+- utterance: "LED 켜줘"
+  expected_tool: turn_wled_on
+
+- utterance: "책상 조명 켜주세요"
+  expected_tool: turn_wled_on
+
+- utterance: "어두운데 불 좀 켜줘"
+  expected_tool: turn_wled_on
+
+- utterance: "라이트 온"
+  expected_tool: turn_wled_on
+
+- utterance: "조명 좀 켜줄래?"
+  expected_tool: turn_wled_on
+
+- utterance: "불 켜"
+  expected_tool: turn_wled_on
+
+- utterance: "너무 컴컴해"
+  expected_tool: turn_wled_on
+  accept_also: [set_wled_brightness]
+  notes: "fixture는 조명이 켜진 상태다. 이미 켜져 있으면 밝기를 올리는 것도 옳다."
+
+- utterance: "책상등 켜줘"
+  expected_tool: turn_wled_on
+
+# --- 끄기 ---
+- utterance: "불 꺼줘"
+  expected_tool: turn_wled_off
+
+- utterance: "조명 꺼"
+  expected_tool: turn_wled_off
+
+- utterance: "LED 꺼줘"
+  expected_tool: turn_wled_off
+
+- utterance: "책상 조명 꺼주세요"
+  expected_tool: turn_wled_off
+
+- utterance: "라이트 오프"
+  expected_tool: turn_wled_off
+
+- utterance: "불 끄고 자자"
+  expected_tool: turn_wled_off
+
+- utterance: "조명 좀 꺼줄래?"
+  expected_tool: turn_wled_off
+
+- utterance: "눈부신데 불 꺼"
+  expected_tool: turn_wled_off
+
+- utterance: "이제 조명 필요 없어"
+  expected_tool: turn_wled_off
+
+- utterance: "책상등 꺼줘"
+  expected_tool: turn_wled_off
+
+# --- 밝기 ---
+- utterance: "밝기 최대로 해줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 240, max: 255}}
+
+- utterance: "제일 밝게"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 240, max: 255}}
+
+- utterance: "밝기 50퍼센트로"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 115, max: 140}}
+
+- utterance: "조명 절반 밝기로 해줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 115, max: 140}}
+
+- utterance: "밝기 100으로 맞춰줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: 100}
+
+- utterance: "밝기 200으로 설정"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: 200}
+
+- utterance: "조명 좀 어둡게 해줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 1, max: 120}}
+
+- utterance: "너무 밝아, 좀 줄여줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 1, max: 120}}
+
+- utterance: "조명 밝게 해줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 150, max: 255}}
+
+- utterance: "은은하게 해줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 1, max: 120}}
+
+- utterance: "밝기 80퍼로 올려줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 190, max: 215}}
+
+- utterance: "조명 최소로 낮춰줘"
+  expected_tool: set_wled_brightness
+  expected_args_match: {brightness: {min: 0, max: 40}}
+
+# --- 색상 ---
+- utterance: "조명 빨간색으로 바꿔줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["FF0000"]}}
+
+- utterance: "불 빨갛게 해줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["FF0000"]}}
+
+- utterance: "파란색으로 해줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["0000FF"]}}
+
+- utterance: "조명 파랗게"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["0000FF"]}}
+
+- utterance: "초록색으로 바꿔줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["00FF00", "008000"]}}
+
+- utterance: "조명 하얀색으로"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["FFFFFF"]}}
+
+- utterance: "노란색으로 해줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["FFFF00", "FFD700", "FFD000", "FFC800", "FFDD00"]}}
+  notes: "순수 노랑만 정답으로 두면 LED에서 더 자연스러운 골드 계열이 오답이 된다."
+
+- utterance: "보라색으로 바꿔줄래?"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["800080", "8000FF", "A020F0", "9400D3", "FF00FF"]}}
+
+- utterance: "조명 주황색으로 해줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["FFA500", "FF8000", "FF7F00"]}}
+
+- utterance: "핑크색으로 바꿔줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: {any_of: ["FFC0CB", "FF69B4", "FF00FF"]}}
+
+- utterance: "색상 FF0000으로 설정해줘"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: "FF0000"}
+
+- utterance: "조명 색 00FF00으로"
+  expected_tool: set_wled_color
+  expected_args_match: {color_hex: "00FF00"}
+
+- utterance: "따뜻한 색으로 바꿔줘"
+  expected_tool: set_wled_color
+  notes: "정확한 색은 자유롭게 두고 tool 선택만 본다."
+
+- utterance: "차가운 색감으로 해줘"
+  expected_tool: set_wled_color
+
+# --- 효과 ---
+- utterance: "무지개 효과로 바꿔줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 9}
+
+- utterance: "레인보우 효과 켜줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 9}
+
+- utterance: "조명 숨쉬는 효과로 해줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 2}
+
+- utterance: "브리드 효과 적용해줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 2}
+
+- utterance: "오로라 효과로 바꿔줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 38}
+
+- utterance: "불꽃 효과 켜줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 45}
+
+- utterance: "효과 끄고 단색으로 해줘"
+  expected_tool: set_wled_effect
+  expected_args_match: {effect_id: 0}
+  accept_also: [set_wled_color]
+
+- utterance: "조명에 효과 좀 넣어줘"
+  expected_tool: set_wled_effect
+  notes: "어떤 효과든 좋다. tool 선택만 본다."
+
+# --- 상태·기능 조회 ---
+- utterance: "지금 조명 켜져 있어?"
+  expected_tool: get_wled_state
+
+- utterance: "조명 밝기 얼마야?"
+  expected_tool: get_wled_state
+
+- utterance: "LED 상태 알려줘"
+  expected_tool: get_wled_state
+
+- utterance: "지금 무슨 색이야?"
+  expected_tool: get_wled_state
+
+- utterance: "조명 지금 어떤 상태지?"
+  expected_tool: get_wled_state
+
+- utterance: "쓸 수 있는 조명 효과 뭐 있어?"
+  expected_tool: get_wled_capabilities
+
+- utterance: "효과 목록 알려줘"
+  expected_tool: get_wled_capabilities
+
+- utterance: "어떤 팔레트 쓸 수 있어?"
+  expected_tool: get_wled_capabilities
+
+- utterance: "조명 효과 종류 보여줘"
+  expected_tool: get_wled_capabilities

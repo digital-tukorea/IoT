@@ -1,0 +1,94 @@
+# 장기 기억과 후속 대화 발화.
+#
+# remember_fact는 사용자가 명시적으로 기억을 요청할 때만 불러야 한다. 일반
+# 대화에서 사실을 추론해 저장하면 안 되므로, "저장하면 안 되는" 발화도 함께
+# 넣어 과잉 호출을 잡는다.
+
+# --- 명시적인 기억 요청 ---
+- utterance: "내가 앉을 때 높이는 72센티인 거 기억해줘"
+  expected_tool: remember_fact
+
+- utterance: "나 커피 안 마시는 거 기억해"
+  expected_tool: remember_fact
+
+- utterance: "앞으로 조명은 항상 따뜻한 색으로 해줘, 기억해둬"
+  expected_tool: remember_fact
+
+- utterance: "이거 기억해놔: 나는 오후에 주로 서서 일해"
+  expected_tool: remember_fact
+
+- utterance: "내 이름은 동현이야, 기억해줘"
+  expected_tool: remember_fact
+
+- utterance: "다음부터는 설명 짧게 해줘, 기억해둬"
+  expected_tool: remember_fact
+
+- utterance: "나 허리 디스크 있는 거 기억하고 있어줘"
+  expected_tool: remember_fact
+
+- utterance: "기억해줘, 나는 저녁 9시 이후엔 조명 어둡게 하는 걸 좋아해"
+  expected_tool: remember_fact
+
+- utterance: "내 선호 틸팅 단계는 2단계야, 저장해줘"
+  expected_tool: remember_fact
+
+- utterance: "앞으로 이렇게 해줘: 아침엔 항상 스탠딩 모드"
+  expected_tool: remember_fact
+
+# --- 명시적인 삭제 요청 ---
+- utterance: "모니터 두 대 쓴다고 한 거 잊어줘"
+  expected_tool: forget_fact
+  notes: "커피는 remember_fact 발화가 쓰므로 시드에 두지 않는다."
+
+- utterance: "서서 일할 때 높이 기억한 거 지워줘"
+  expected_tool: forget_fact
+  notes: "fixtures.py의 시드에 있는 사실이어야 model이 특정할 수 있다."
+
+- utterance: "앉을 때 높이 기억해둔 거 삭제해줘"
+  expected_tool: forget_fact
+  notes: "앉을 때/서서 두 높이가 시드돼 있으므로 어느 쪽인지 분명해야 한다."
+
+- utterance: "조명 취향 기억한 거 없애줘"
+  expected_tool: forget_fact
+
+- utterance: "저장해둔 틸팅 단계 선호 잊어버려"
+  expected_tool: forget_fact
+
+# --- 기억하면 안 되는 일반 대화 ---
+# 어떤 tool도 부르지 않거나 request_followup만 부르는 것이 정답이다.
+# expected_tool을 request_followup으로 두어 remember_fact 과잉 호출을 잡는다.
+- utterance: "오늘 좀 피곤하네"
+  expected_tool: request_followup
+  notes: "일반 대화. remember_fact를 부르면 안 된다."
+
+- utterance: "어제 늦게 잤어"
+  expected_tool: request_followup
+  notes: "일반 대화. remember_fact를 부르면 안 된다."
+
+- utterance: "나 지금 리액트 공부하고 있어"
+  expected_tool: request_followup
+  notes: "일반 대화. remember_fact를 부르면 안 된다."
+
+- utterance: "이 책상 꽤 괜찮은 것 같아"
+  expected_tool: request_followup
+  notes: "일반 대화. remember_fact를 부르면 안 된다."
+
+- utterance: "점심으로 김치찌개 먹었어"
+  expected_tool: request_followup
+  notes: "일반 대화. remember_fact를 부르면 안 된다."
+
+# --- 후속 대화가 필요한 질문 ---
+- utterance: "책상 높이 어떻게 조절해?"
+  expected_tool: request_followup
+
+- utterance: "작업 모드가 뭐야?"
+  expected_tool: request_followup
+
+- utterance: "틸팅 기능은 어떻게 쓰는 거야?"
+  expected_tool: request_followup
+
+- utterance: "너 뭐 할 수 있어?"
+  expected_tool: request_followup
+
+- utterance: "스탠딩 데스크가 건강에 좋아?"
+  expected_tool: request_followup

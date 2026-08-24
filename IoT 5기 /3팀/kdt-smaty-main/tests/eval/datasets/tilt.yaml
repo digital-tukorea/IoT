@@ -1,0 +1,188 @@
+# 상판 틸팅 발화.
+#
+# 사용자는 "단계"로 말한다. fixture의 허용 범위는 0~3단계이고, 가장 낮은
+# 단계(0)는 각도를 다시 0으로 맞추는 동작도 겸한다. 현재 단계나 범위를
+# 알아야 하는 상대 명령에서는 get_tilt_state를 먼저 부르는 것이 정상이다.
+
+# --- 명시적인 단계 지정 ---
+- utterance: "틸팅 2단계로 해줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 2}
+
+- utterance: "틸트 1단계"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 1}
+
+- utterance: "상판 3단계로 기울여줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+- utterance: "기울기 2단계로 맞춰줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 2}
+
+- utterance: "틸팅 3단계로 올려줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+- utterance: "틸트 레벨 1로 설정"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 1}
+
+- utterance: "상판 기울기 2단계 부탁해"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 2}
+
+- utterance: "틸팅을 1단계로 바꿔줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 1}
+
+- utterance: "책상 상판 3단계"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+- utterance: "기울기 단계 2로 해줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 2}
+
+- utterance: "틸팅 0단계로"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "틸트 2단으로 세팅"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 2}
+
+# --- 평평하게: 최저 단계 ---
+- utterance: "상판 평평하게 해줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "틸팅 원위치"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "기울기 없애줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "책상 다시 수평으로"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "틸팅 끄고 원래대로 돌려줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "상판 각도 초기화해줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "기울인 거 풀어줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+- utterance: "틸팅 안 쓸래, 평평하게"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 0}
+
+# --- 최대로 기울이기 ---
+- utterance: "상판 최대한 기울여줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+- utterance: "틸팅 제일 높게 해줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+- utterance: "기울기 최대로"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+- utterance: "틸트 끝까지 올려줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: 3}
+
+# --- 상대적인 조절: 현재 단계를 먼저 읽어야 한다 ---
+- utterance: "상판 좀 더 기울여줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 1, max: 3}}
+  notes: "get_tilt_state로 현재 단계를 읽고 한 단계 올려야 한다."
+
+- utterance: "틸팅 한 단계만 올려줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 1, max: 3}}
+
+- utterance: "조금만 더 세워줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 1, max: 3}}
+
+- utterance: "기울기 살짝 줄여줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 0, max: 2}}
+
+- utterance: "틸팅 한 단계 내려"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 0, max: 2}}
+
+- utterance: "너무 기울었어, 좀 낮춰줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 0, max: 2}}
+
+- utterance: "상판이 너무 눕혀져 있는데 더 세워줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 1, max: 3}}
+
+- utterance: "글씨 쓰기 편하게 좀 기울여줘"
+  expected_tool: set_tilt_level
+  expected_args_match: {level: {min: 1, max: 3}}
+
+# --- 상태 조회 ---
+- utterance: "지금 틸팅 몇 단계야?"
+  expected_tool: get_tilt_state
+
+- utterance: "상판 기울기 상태 알려줘"
+  expected_tool: get_tilt_state
+
+- utterance: "틸트 지금 어느 정도지?"
+  expected_tool: get_tilt_state
+
+- utterance: "기울기 몇 단계까지 돼?"
+  expected_tool: get_tilt_state
+
+- utterance: "틸팅 범위가 어떻게 되지?"
+  expected_tool: get_tilt_state
+
+- utterance: "상판 지금 평평해?"
+  expected_tool: get_tilt_state
+
+- utterance: "틸팅 설정 확인해줘"
+  expected_tool: get_tilt_state
+
+- utterance: "지금 틸트 상태가 어때?"
+  expected_tool: get_tilt_state
+
+# --- 틸팅 정지: 안전 명령 ---
+- utterance: "틸팅 멈춰"
+  expected_tool: stop_tilt
+
+- utterance: "상판 그만 움직여"
+  expected_tool: stop_tilt
+
+- utterance: "틸트 정지"
+  expected_tool: stop_tilt
+
+- utterance: "기울이는 거 멈춰줘"
+  expected_tool: stop_tilt
+
+- utterance: "틸팅 스톱"
+  expected_tool: stop_tilt
+
+- utterance: "어 그만, 상판 거기서 멈춰"
+  expected_tool: stop_tilt
+
+- utterance: "틸팅 그만해"
+  expected_tool: stop_tilt
+
+- utterance: "상판 멈춰줘"
+  expected_tool: stop_tilt
