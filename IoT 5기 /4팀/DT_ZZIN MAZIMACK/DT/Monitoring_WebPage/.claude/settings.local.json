@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp *)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:5173/ -o /dev/null -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(wait)",
+      "Bash(curl -s \"https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css\")",
+      "Bash(npx eslint *)",
+      "Bash(npx vite *)",
+      "PowerShell(npm run *)",
+      "Bash(xargs wc -l)"
+    ]
+  }
+}
