@@ -1,0 +1,28 @@
+/* The dashboard is designed on a fixed 1440×900 canvas. The frame keeps that
+   aspect and stays centered inside the viewport. */
+.app-frame {
+  width: 1440px;
+  height: 900px;
+  position: relative;
+  overflow: hidden;
+  background: #171614;
+  color: #eceae5;
+  border-radius: 14px;
+  font-size: 13px;
+}
+
+/* Hover affordances (ported from the design's style-hover hints). */
+.btn-primary {
+  transition: filter 0.15s;
+}
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn-ghost:hover {
+  filter: brightness(1.15);
+}
+
+.event-card:hover {
+  transform: translateY(-1px);
+}
